@@ -1,0 +1,57 @@
+{{define "admin/folder_edit.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="admin-container">
+    <nav class="admin-nav">
+        <a href="/admin">{{template "icon-home"}} Dashboard</a>
+        <a href="/admin/folders" class="active">{{template "icon-folder-small"}} Folders</a>
+        <a href="/admin/photos">{{template "icon-image"}} Photos</a>
+        <a href="/" target="_blank">{{template "icon-external"}} View Site</a>
+    </nav>
+
+    <main class="admin-main">
+        <div class="page-header">
+            <h1>Edit: {{.Folder.Name}}</h1>
+            <a href="/admin/folders" class="btn">{{template "icon-back"}} Back</a>
+        </div>
+
+        <form action="/admin/folders/{{.Folder.ID}}" method="POST" class="edit-form">
+            <div class="form-group">
+                <label for="name">Name</label>
+                <input type="text" name="name" id="name" value="{{.Folder.Name}}" required>
+            </div>
+            <div class="form-group">
+                <label>Path</label>
+                <input type="text" value="{{.Folder.Path}}" disabled>
+            </div>
+            <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+
+        {{if .Photos}}
+        <section class="cover-section">
+            <h2>Set Cover Photo</h2>
+            <div class="cover-grid">
+                {{range .Photos}}
+                <div class="cover-option {{if $.Folder.CoverPhotoID.Valid}}{{if eq $.Folder.CoverPhotoID.Int64 (int64 .ID)}}selected{{end}}{{end}}">
+                    <img src="/thumb/small/{{.ID}}" alt="" onclick="setCover({{$.Folder.ID}}, {{.ID}})">
+                </div>
+                {{end}}
+            </div>
+            {{if .Folder.CoverPhotoID.Valid}}
+            <button class="btn btn-secondary" onclick="setCover({{.Folder.ID}}, null)">Clear Cover</button>
+            {{end}}
+        </section>
+        {{end}}
+    </main>
+</div>
+<script src="/static/js/admin.js"></script>
+</body>
+</html>
+{{end}}

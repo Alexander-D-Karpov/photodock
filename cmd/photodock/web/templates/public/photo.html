@@ -1,0 +1,113 @@
+{{define "public/photo.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    {{if .NextURL}}<link rel="prefetch" href="{{.NextURL}}">{{end}}
+    {{if .PrevURL}}<link rel="prefetch" href="{{.PrevURL}}">{{end}}
+</head>
+<body>
+<div class="viewer-container">
+    <header class="viewer-header">
+        <div class="viewer-header-left">
+            <nav class="breadcrumbs">
+                <a href="/">/</a>
+                {{range .Breadcrumbs}}
+                <a href="/folder/{{.ID}}">{{.Name}}</a>
+                <span class="separator">/</span>
+                {{end}}
+                <span>{{.Photo.Filename}}</span>
+            </nav>
+        </div>
+        <div class="viewer-header-right">
+            {{if .PhotoPosition}}
+            <span class="photo-counter">{{.PhotoPosition}} of {{.PhotoTotal}}</span>
+            {{end}}
+            <button class="btn-icon close-btn" onclick="goBack()" title="Close (Esc)">
+                {{template "icon-close"}}
+            </button>
+        </div>
+    </header>
+
+    <div class="viewer-body">
+        <div class="viewer-main">
+            <div class="viewer-nav">
+                {{if .PrevURL}}<a href="{{.PrevURL}}" class="nav-btn prev" id="prev-btn">{{template "icon-chevron-left"}}</a>{{else}}<span class="nav-btn"></span>{{end}}
+                {{if .NextURL}}<a href="{{.NextURL}}" class="nav-btn next" id="next-btn">{{template "icon-chevron-right"}}</a>{{else}}<span class="nav-btn"></span>{{end}}
+            </div>
+
+            <div class="viewer-image">
+                <img src="/original/{{.Photo.ID}}" alt="{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{else}}{{.Photo.Filename}}{{end}}" id="main-image">
+            </div>
+        </div>
+
+        <aside class="viewer-sidebar" id="sidebar">
+            <div class="sidebar-content">
+                <h2>{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{else}}{{.Photo.Filename}}{{end}}</h2>
+
+                {{if .Photo.Description.Valid}}
+                <p class="description">{{.Photo.Description.String}}</p>
+                {{end}}
+
+                {{if .Photo.Note.Valid}}
+                <div class="note">
+                    <strong>Note:</strong>
+                    <p>{{.Photo.Note.String}}</p>
+                </div>
+                {{end}}
+
+                <h3>Camera</h3>
+                <dl class="exif-list">
+                    {{if .ExifInfo.CameraModel}}<dt>Camera</dt><dd>{{if .ExifInfo.CameraMake}}{{.ExifInfo.CameraMake}} {{end}}{{.ExifInfo.CameraModel}}</dd>{{end}}
+                    {{if .ExifInfo.LensModel}}<dt>Lens</dt><dd>{{.ExifInfo.LensModel}}</dd>{{end}}
+                    {{if .ExifInfo.FocalLength}}<dt>Focal Length</dt><dd>{{.ExifInfo.FocalLength}}{{if .ExifInfo.FocalLength35mm}} ({{.ExifInfo.FocalLength35mm}} eq.){{end}}</dd>{{end}}
+                    {{if .ExifInfo.Aperture}}<dt>Aperture</dt><dd>{{.ExifInfo.Aperture}}</dd>{{end}}
+                    {{if .ExifInfo.ShutterSpeed}}<dt>Shutter</dt><dd>{{.ExifInfo.ShutterSpeed}}</dd>{{end}}
+                    {{if .ExifInfo.ISO}}<dt>ISO</dt><dd>{{.ExifInfo.ISO}}</dd>{{end}}
+                    {{if .ExifInfo.DateTimeOriginal}}<dt>Date Taken</dt><dd>{{.ExifInfo.DateTimeOriginal}}</dd>{{end}}
+                </dl>
+
+                <details class="more-exif">
+                    <summary>More Details</summary>
+                    <dl class="exif-list">
+                        {{if .ExifInfo.ExposureComp}}<dt>Exposure Comp</dt><dd>{{.ExifInfo.ExposureComp}}</dd>{{end}}
+                        {{if .ExifInfo.ExposureMode}}<dt>Exposure Mode</dt><dd>{{.ExifInfo.ExposureMode}}</dd>{{end}}
+                        {{if .ExifInfo.MeteringMode}}<dt>Metering</dt><dd>{{.ExifInfo.MeteringMode}}</dd>{{end}}
+                        {{if .ExifInfo.WhiteBalance}}<dt>White Balance</dt><dd>{{.ExifInfo.WhiteBalance}}</dd>{{end}}
+                        {{if .ExifInfo.Flash}}<dt>Flash</dt><dd>{{.ExifInfo.Flash}}</dd>{{end}}
+                        {{if .ExifInfo.ColorSpace}}<dt>Color Space</dt><dd>{{.ExifInfo.ColorSpace}}</dd>{{end}}
+                    </dl>
+                </details>
+
+                <h3>File</h3>
+                <dl class="exif-list">
+                    <dt>Filename</dt><dd>{{.Photo.Filename}}</dd>
+                    <dt>Dimensions</dt><dd>{{.Photo.Width}} x {{.Photo.Height}}</dd>
+                    <dt>Size</dt><dd>{{formatSize .Photo.SizeBytes}}</dd>
+                    <dt>Path</dt><dd class="path-value">/p/{{.Photo.URLPath}}</dd>
+                </dl>
+
+            </div>
+        </aside>
+    </div>
+
+    <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle info (I)">
+        {{template "icon-info"}}
+    </button>
+</div>
+<script src="/static/js/viewer.js"></script>
+<script>
+    initViewer({
+        prevUrl: {{if .PrevURL}}"{{.PrevURL}}"{{else}}null{{end}},
+    nextUrl: {{if .NextURL}}"{{.NextURL}}"{{else}}null{{end}},
+    prevId: {{if .PrevID}}{{.PrevID}}{{else}}null{{end}},
+    nextId: {{if .NextID}}{{.NextID}}{{else}}null{{end}},
+    folderUrl: {{if .FolderURL}}"{{.FolderURL}}"{{else}}null{{end}}
+    });
+</script>
+</body>
+</html>
+{{end}}

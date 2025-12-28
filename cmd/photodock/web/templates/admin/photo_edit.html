@@ -1,0 +1,124 @@
+{{define "admin/photo_edit.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="admin-container">
+    <nav class="admin-nav">
+        <a href="/admin">{{template "icon-home"}} Dashboard</a>
+        <a href="/admin/folders">{{template "icon-folder-small"}} Folders</a>
+        <a href="/admin/photos" class="active">{{template "icon-image"}} Photos</a>
+        <a href="/" target="_blank">{{template "icon-external"}} View Site</a>
+    </nav>
+
+    <main class="admin-main photo-edit-page">
+        <div class="page-header">
+            <h1>Edit Photo</h1>
+            <a href="/admin/photos" class="btn">{{template "icon-back"}} Back to Photos</a>
+        </div>
+
+        <div class="photo-edit-layout">
+            <div class="photo-preview">
+                <img src="/thumb/medium/{{.Photo.ID}}" alt="{{.Photo.Filename}}">
+                <div class="photo-preview-actions">
+                    <a href="/photo/{{.Photo.ID}}" target="_blank" class="btn btn-secondary">{{template "icon-external"}} View Full</a>
+                    <a href="/original/{{.Photo.ID}}" download="{{.Photo.Filename}}" class="btn btn-secondary">{{template "icon-upload"}} Download</a>
+                </div>
+            </div>
+
+            <form action="/admin/photos/{{.Photo.ID}}" method="POST" class="edit-form">
+                <h3>Basic Info</h3>
+                <div class="form-group">
+                    <label for="title">Title</label>
+                    <input type="text" name="title" id="title" value="{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{end}}" placeholder="Optional display title">
+                    <small>Leave empty to use filename</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <textarea name="description" id="description" rows="3" placeholder="Photo description...">{{if .Photo.Description.Valid}}{{.Photo.Description.String}}{{end}}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="note">Private Note</label>
+                    <textarea name="note" id="note" rows="2" placeholder="Personal notes (shown in sidebar)">{{if .Photo.Note.Valid}}{{.Photo.Note.String}}{{end}}</textarea>
+                </div>
+
+                <h3>Organization</h3>
+                <div class="meta-grid">
+                    <div class="form-group">
+                        <label for="folder">Folder</label>
+                        <select name="folder_id" id="folder">
+                            <option value="null">Root (no folder)</option>
+                            {{range .Folders}}
+                            <option value="{{.ID}}" {{if $.Photo.FolderID.Valid}}{{if eq $.Photo.FolderID.Int64 (int64 .ID)}}selected{{end}}{{end}}>{{.Path}}</option>
+                            {{end}}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Visibility</label>
+                        <button type="button" class="btn {{if .Photo.Hidden}}btn-primary{{else}}btn-secondary{{end}}" onclick="toggleHide({{.Photo.ID}}); location.reload();">
+                            {{if .Photo.Hidden}}{{template "icon-eye"}} Hidden{{else}}{{template "icon-eye-off"}} Visible{{end}}
+                        </button>
+                    </div>
+                </div>
+
+                <h3>File Info</h3>
+                <div class="meta-grid">
+                    <div class="form-group">
+                        <label>Filename</label>
+                        <input type="text" value="{{.Photo.Filename}}" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label>URL Path</label>
+                        <input type="text" value="/p/{{.Photo.URLPath}}" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label>Dimensions</label>
+                        <input type="text" value="{{.Photo.Width}} × {{.Photo.Height}} px" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label>File Size</label>
+                        <input type="text" value="{{formatSize .Photo.SizeBytes}}" disabled>
+                    </div>
+                </div>
+
+                <div class="dialog-actions" style="margin-top: 25px;">
+                    <button type="button" class="btn btn-danger" onclick="if(confirm('Delete this photo permanently?')){deletePhoto({{.Photo.ID}}); window.location='/admin/photos';}">{{template "icon-trash"}} Delete</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="exif-panel">
+            <h3>EXIF Data</h3>
+            <dl class="exif-list">
+                {{if .ExifInfo.CameraModel}}<dt>Camera</dt><dd>{{if .ExifInfo.CameraMake}}{{.ExifInfo.CameraMake}} {{end}}{{.ExifInfo.CameraModel}}</dd>{{end}}
+                {{if .ExifInfo.LensModel}}<dt>Lens</dt><dd>{{.ExifInfo.LensModel}}</dd>{{end}}
+                {{if .ExifInfo.FocalLength}}<dt>Focal Length</dt><dd>{{.ExifInfo.FocalLength}}{{if .ExifInfo.FocalLength35mm}} ({{.ExifInfo.FocalLength35mm}} eq.){{end}}</dd>{{end}}
+                {{if .ExifInfo.Aperture}}<dt>Aperture</dt><dd>{{.ExifInfo.Aperture}}</dd>{{end}}
+                {{if .ExifInfo.ShutterSpeed}}<dt>Shutter</dt><dd>{{.ExifInfo.ShutterSpeed}}</dd>{{end}}
+                {{if .ExifInfo.ISO}}<dt>ISO</dt><dd>{{.ExifInfo.ISO}}</dd>{{end}}
+                {{if .ExifInfo.ExposureComp}}<dt>Exp. Comp</dt><dd>{{.ExifInfo.ExposureComp}}</dd>{{end}}
+                {{if .ExifInfo.ExposureMode}}<dt>Exp. Mode</dt><dd>{{.ExifInfo.ExposureMode}}</dd>{{end}}
+                {{if .ExifInfo.MeteringMode}}<dt>Metering</dt><dd>{{.ExifInfo.MeteringMode}}</dd>{{end}}
+                {{if .ExifInfo.WhiteBalance}}<dt>White Balance</dt><dd>{{.ExifInfo.WhiteBalance}}</dd>{{end}}
+                {{if .ExifInfo.Flash}}<dt>Flash</dt><dd>{{.ExifInfo.Flash}}</dd>{{end}}
+                {{if .ExifInfo.ColorSpace}}<dt>Color Space</dt><dd>{{.ExifInfo.ColorSpace}}</dd>{{end}}
+                {{if .ExifInfo.DateTimeOriginal}}<dt>Date Taken</dt><dd>{{.ExifInfo.DateTimeOriginal}}</dd>{{end}}
+                {{if .ExifInfo.Software}}<dt>Software</dt><dd>{{.ExifInfo.Software}}</dd>{{end}}
+                {{if .ExifInfo.Artist}}<dt>Artist</dt><dd>{{.ExifInfo.Artist}}</dd>{{end}}
+                {{if .ExifInfo.Copyright}}<dt>Copyright</dt><dd>{{.ExifInfo.Copyright}}</dd>{{end}}
+            </dl>
+        </div>
+    </main>
+</div>
+<script src="/static/js/admin.js"></script>
+</body>
+</html>
+{{end}}

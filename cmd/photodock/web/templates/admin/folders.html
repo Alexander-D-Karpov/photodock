@@ -1,0 +1,95 @@
+{{define "admin/folders.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="admin-container">
+    <nav class="admin-nav">
+        <a href="/admin">{{template "icon-home"}} Dashboard</a>
+        <a href="/admin/folders" class="active">{{template "icon-folder-small"}} Folders</a>
+        <a href="/admin/photos">{{template "icon-image"}} Photos</a>
+        <a href="/" target="_blank">{{template "icon-external"}} View Site</a>
+    </nav>
+
+    <main class="admin-main">
+        <div class="page-header">
+            <h1>Folders</h1>
+            <button class="btn btn-primary" onclick="showCreateFolder()">{{template "icon-plus"}} New Folder</button>
+        </div>
+
+        <div class="folder-tree-container">
+            <div class="folder-tree">
+                {{if not .Folders}}
+                <div class="empty-tree">
+                    <p>No folders yet. Create one or scan your media directory.</p>
+                </div>
+                {{else}}
+                {{range .Folders}}
+                <div class="tree-item" data-id="{{.ID}}" data-parent="{{if .ParentID.Valid}}{{.ParentID.Int64}}{{else}}root{{end}}" data-depth="{{.Depth}}" style="--depth: {{.Depth}}">
+                    <div class="tree-row">
+                        <div class="tree-indent">
+                            {{if .HasChildren}}
+                            <button class="tree-toggle" onclick="toggleTreeItem({{.ID}})">
+                                {{template "icon-chevron-right"}}
+                            </button>
+                            {{else}}
+                            <span class="tree-toggle-placeholder"></span>
+                            {{end}}
+                        </div>
+                        <div class="tree-icon">
+                            {{if .CoverURL}}
+                            <img src="{{.CoverURL}}" alt="" class="tree-preview">
+                            {{else}}
+                            {{template "icon-folder-small"}}
+                            {{end}}
+                        </div>
+                        <div class="tree-content">
+                            <span class="tree-name">{{.Name}}</span>
+                            <span class="tree-meta">{{.PhotoCount}} photos{{if .SubfolderCount}}, {{.SubfolderCount}} subfolders{{end}}</span>
+                        </div>
+                        <div class="tree-path">{{.Path}}</div>
+                        <div class="tree-actions">
+                            <a href="/admin/folders/{{.ID}}" class="btn btn-small">Edit</a>
+                            <button class="btn btn-small" onclick="scanFolder({{.ID}})">Scan</button>
+                            <button class="btn btn-small btn-danger" onclick="deleteFolder({{.ID}})">Delete</button>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+                {{end}}
+            </div>
+        </div>
+    </main>
+
+    <dialog id="create-folder-dialog" class="admin-dialog">
+        <form action="/admin/folders" method="POST">
+            <h2>Create Folder</h2>
+            <div class="form-group">
+                <label for="folder-name">Name</label>
+                <input type="text" name="name" id="folder-name" required>
+            </div>
+            <div class="form-group">
+                <label for="parent-folder">Parent Folder</label>
+                <select name="parent_id" id="parent-folder">
+                    <option value="">Root</option>
+                    {{range .Folders}}
+                    <option value="{{.ID}}">{{if .Depth}}{{range $i := (iterate .Depth)}}&nbsp;&nbsp;{{end}}{{end}}{{.Name}}</option>
+                    {{end}}
+                </select>
+            </div>
+            <div class="dialog-actions">
+                <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create</button>
+            </div>
+        </form>
+    </dialog>
+</div>
+<script src="/static/js/admin.js"></script>
+</body>
+</html>
+{{end}}

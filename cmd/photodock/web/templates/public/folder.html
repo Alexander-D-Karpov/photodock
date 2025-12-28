@@ -1,0 +1,148 @@
+{{define "public/folder.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="index-page">
+<div class="index-container">
+    <header class="index-header">
+        <nav class="breadcrumbs">
+            <a href="/">/</a>
+            {{ $n := len .Breadcrumbs }}
+            {{range $i, $b := .Breadcrumbs}}
+            {{if lt $i (sub $n 1)}}
+            <a href="/folder/{{$b.ID}}">{{$b.Name}}</a>
+            <span class="separator">/</span>
+            {{else}}
+            <span>{{$b.Name}}</span>
+            {{end}}
+            {{end}}
+        </nav>
+        <div class="index-header-controls">
+            <div class="sort-control">
+                <label for="sort-select">Sort:</label>
+                <select id="sort-select">
+                    <option value="date-desc">Newest first</option>
+                    <option value="date-asc">Oldest first</option>
+                    <option value="name-asc">Name A-Z</option>
+                    <option value="name-desc">Name Z-A</option>
+                    <option value="size-desc">Largest first</option>
+                    <option value="size-asc">Smallest first</option>
+                </select>
+            </div>
+            <div class="view-toggle">
+                <button class="view-btn" data-view="grid" title="Grid view">{{template "icon-grid"}}</button>
+                <button class="view-btn" data-view="list" title="List view">{{template "icon-list"}}</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="index-content" id="content">
+        <table class="file-list" id="file-list" style="display: none;">
+            <thead>
+            <tr>
+                <th class="col-icon"></th>
+                <th class="col-name">Name</th>
+                <th class="col-size">Size</th>
+                <th class="col-date">Taken</th>
+            </tr>
+            </thead>
+            <tbody>
+            {{if .Folder.ParentID.Valid}}
+            <tr class="folder-row parent-row">
+                <td class="col-icon">{{template "icon-folder-small"}}</td>
+                <td class="col-name"><a href="/folder/{{.Folder.ParentID.Int64}}">../</a></td>
+                <td class="col-size">-</td>
+                <td class="col-date">-</td>
+            </tr>
+            {{else}}
+            <tr class="folder-row parent-row">
+                <td class="col-icon">{{template "icon-folder-small"}}</td>
+                <td class="col-name"><a href="/">../</a></td>
+                <td class="col-size">-</td>
+                <td class="col-date">-</td>
+            </tr>
+            {{end}}
+            {{range .Subfolders}}
+            <tr class="folder-row" data-name="{{.Name}}" data-size="{{.TotalSize}}" data-date="{{.CreatedAt.Unix}}">
+                <td class="col-icon">{{template "icon-folder-small"}}</td>
+                <td class="col-name">
+                    <a href="/folder/{{.ID}}">{{.Name}}/</a>
+                    <span class="item-meta">{{.PhotoCount}} photos{{if .SubfolderCount}}, {{.SubfolderCount}} folders{{end}}</span>
+                </td>
+                <td class="col-size">{{if gt .TotalSize 0}}{{formatSize .TotalSize}}{{else}}-{{end}}</td>
+                <td class="col-date">{{formatDate .CreatedAt}}</td>
+            </tr>
+            {{end}}
+            {{range .Photos}}
+            <tr class="photo-row" data-name="{{.Filename}}" data-size="{{.SizeBytes}}" data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}" data-id="{{.ID}}" data-width="{{.Width}}" data-height="{{.Height}}">
+                <td class="col-icon">
+                    <img src="/thumb/small/{{.ID}}" alt="" class="list-thumb" loading="lazy">
+                </td>
+                <td class="col-name">
+                    <a href="{{if .URLPath}}/p/{{.URLPath}}{{else}}/photo/{{.ID}}{{end}}">{{.Filename}}</a>
+                    <span class="item-meta">{{.Width}}x{{.Height}}</span>
+                </td>
+                <td class="col-size">{{formatSize .SizeBytes}}</td>
+                <td class="col-date">{{if .TakenAt.Valid}}{{formatDate .TakenAt.Time}}{{else}}-{{end}}</td>
+            </tr>
+            {{end}}
+            </tbody>
+        </table>
+
+        <div class="grid-view" id="grid-view">
+            {{if .Subfolders}}
+            <div class="grid-section">
+                <h2>Folders</h2>
+                <div class="folders-grid">
+                    {{range .Subfolders}}
+                    <a href="/folder/{{.ID}}" class="folder-card" data-name="{{.Name}}" data-date="{{.CreatedAt.Unix}}">
+                        <div class="folder-cover">
+                            {{if .CoverURL}}
+                            <img src="{{.CoverURL}}" alt="{{.Name}}" loading="lazy">
+                            {{else}}
+                            {{template "icon-folder"}}
+                            {{end}}
+                        </div>
+                        <div class="folder-info">
+                            <span class="folder-name">{{.Name}}</span>
+                            <span class="folder-count">{{.PhotoCount}} photos</span>
+                        </div>
+                    </a>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+
+            {{if .Photos}}
+            <div class="grid-section">
+                <h2>Photos</h2>
+                <div class="masonry" id="gallery">
+                    {{range .Photos}}
+                    <a href="{{if .URLPath}}/p/{{.URLPath}}{{else}}/photo/{{.ID}}{{end}}" class="photo-item" data-id="{{.ID}}" data-name="{{.Filename}}" data-size="{{.SizeBytes}}" data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
+                        <img class="lazy" data-src="/thumb/small/{{.ID}}"
+                             {{if .Blurhash.Valid}}data-placeholder="/placeholder/{{.ID}}"{{end}}
+                             alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}"
+                             loading="lazy">
+                    </a>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+        </div>
+    </div>
+
+    <footer class="index-footer">
+        <span>{{len .Photos}} photos{{if .Subfolders}}, {{len .Subfolders}} folders{{end}}</span>
+        <span><a href="https://github.com/Alexander-D-Karpov/photodock" target="_blank" rel="noopener">GitHub</a></span>
+    </footer>
+</div>
+<script src="/static/js/gallery.js"></script>
+<script src="/static/js/index.js"></script>
+</body>
+</html>
+{{end}}

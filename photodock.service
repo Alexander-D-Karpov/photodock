@@ -1,0 +1,16 @@
+[Unit]
+Description=PhotoDock Photo Gallery
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/photodock
+ExecStart=/opt/photodock/photodock
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/photodock/.env
+
+[Install]
+WantedBy=multi-user.target

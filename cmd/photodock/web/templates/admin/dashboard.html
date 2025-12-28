@@ -1,0 +1,88 @@
+{{define "admin/dashboard.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="admin-container">
+    <nav class="admin-nav">
+        <a href="/admin" class="active">{{template "icon-home"}} Dashboard</a>
+        <a href="/admin/folders">{{template "icon-folder-small"}} Folders</a>
+        <a href="/admin/photos">{{template "icon-image"}} Photos</a>
+        <a href="/" target="_blank">{{template "icon-external"}} View Site</a>
+    </nav>
+
+    <main class="admin-main">
+        <h1>Dashboard</h1>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-value">{{.PhotoCount}}</span>
+                <span class="stat-label">Photos</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">{{.FolderCount}}</span>
+                <span class="stat-label">Folders</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">{{.HiddenCount}}</span>
+                <span class="stat-label">Hidden</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-value">{{formatSize .TotalSize}}</span>
+                <span class="stat-label">Total Size</span>
+            </div>
+        </div>
+
+        <div class="actions-section">
+            <h2>Actions</h2>
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="scanAll()">{{template "icon-scan"}} Scan All Folders</button>
+                <button class="btn btn-secondary" onclick="cleanOrphans()">{{template "icon-clean"}} Clean Orphans</button>
+            </div>
+        </div>
+
+        <div class="upload-section">
+            <h2>Upload Photos</h2>
+            <div class="upload-zone" id="upload-zone">
+                <div class="upload-zone-content">
+                    {{template "icon-upload"}}
+                    <p>Drag & drop photos here or click to select</p>
+                    <p class="upload-hint">Supports JPG, PNG files</p>
+                </div>
+                <input type="file" id="file-input" multiple accept="image/jpeg,image/png" style="display: none;">
+            </div>
+
+            <div class="upload-options">
+                <label>
+                    Upload to:
+                    <select id="upload-folder">
+                        <option value="">Root</option>
+                        {{range .Folders}}
+                        <option value="{{.ID}}">{{.Path}}</option>
+                        {{end}}
+                    </select>
+                </label>
+            </div>
+
+            <div class="upload-queue" id="upload-queue" style="display: none;">
+                <h3>Upload Progress</h3>
+                <div class="queue-list" id="queue-list"></div>
+                <div class="upload-summary">
+                    <span id="upload-status">Ready</span>
+                    <button class="btn btn-small" id="start-upload" onclick="startUpload()">Start Upload</button>
+                    <button class="btn btn-small btn-secondary" id="clear-queue" onclick="clearQueue()">Clear</button>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+<script src="/static/js/admin.js"></script>
+<script src="/static/js/upload.js"></script>
+</body>
+</html>
+{{end}}
