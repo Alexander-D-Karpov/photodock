@@ -61,10 +61,11 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 		"formatDate": func(t time.Time) string {
 			return t.Format("2006-01-02 15:04")
 		},
-		"add":     func(a, b int) int { return a + b },
-		"sub":     func(a, b int) int { return a - b },
-		"int64":   func(i int) int64 { return int64(i) },
-		"urlpath": escapeURLPath,
+		"add":       func(a, b int) int { return a + b },
+		"sub":       func(a, b int) int { return a - b },
+		"int64":     func(i int) int64 { return int64(i) },
+		"urlpath":   escapeURLPath,
+		"hasPrefix": strings.HasPrefix,
 		"iterate": func(n int) []int {
 			result := make([]int, n)
 			for i := range result {
@@ -352,6 +353,21 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		folderURL = "/p/" + escapeURLPath(breadcrumbs[len(breadcrumbs)-1].Path) + "/"
 	}
 
+	baseURL := "https://" + r.Host
+	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") != "https" {
+		baseURL = "http://" + r.Host
+	}
+
+	previewWidth := 1920
+	previewHeight := 0
+	if photo.Width > 0 && photo.Height > 0 {
+		previewHeight = int(float64(photo.Height) * (float64(previewWidth) / float64(photo.Width)))
+		if photo.Width < previewWidth {
+			previewWidth = photo.Width
+			previewHeight = photo.Height
+		}
+	}
+
 	h.render(w, "public/photo.html", map[string]interface{}{
 		"Photo":         photo,
 		"ExifInfo":      exifInfo,
@@ -364,6 +380,9 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		"FolderURL":     folderURL,
 		"PhotoPosition": position,
 		"PhotoTotal":    total,
+		"BaseURL":       baseURL,
+		"PreviewWidth":  previewWidth,
+		"PreviewHeight": previewHeight,
 	})
 }
 

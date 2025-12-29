@@ -6,6 +6,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
     <link rel="stylesheet" href="/static/css/style.css">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="{{.Title}}">
+    {{if .Photo.Description.Valid}}<meta property="og:description" content="{{.Photo.Description.String}}">{{end}}
+    <meta property="og:image" content="{{.BaseURL}}/thumb/large/{{.Photo.ID}}">
+    <meta property="og:image:width" content="{{.PreviewWidth}}">
+    <meta property="og:image:height" content="{{.PreviewHeight}}">
+    <meta property="og:url" content="{{.BaseURL}}/p/{{.Photo.URLPath}}">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{.Title}}">
+    {{if .Photo.Description.Valid}}<meta name="twitter:description" content="{{.Photo.Description.String}}">{{end}}
+    <meta name="twitter:image" content="{{.BaseURL}}/thumb/large/{{.Photo.ID}}">
+
     {{if .NextURL}}<link rel="prefetch" href="{{.NextURL}}">{{end}}
     {{if .PrevURL}}<link rel="prefetch" href="{{.PrevURL}}">{{end}}
     <link rel="preload" href="/thumb/large/{{.Photo.ID}}" as="image">
@@ -75,7 +91,7 @@
 
                 <h3>Camera</h3>
                 <dl class="exif-list">
-                    {{if .ExifInfo.CameraModel}}<dt>Camera</dt><dd>{{if .ExifInfo.CameraMake}}{{.ExifInfo.CameraMake}} {{end}}{{.ExifInfo.CameraModel}}</dd>{{end}}
+                    {{if .ExifInfo.CameraModel}}<dt>Camera</dt><dd>{{if and .ExifInfo.CameraMake (not (hasPrefix .ExifInfo.CameraModel .ExifInfo.CameraMake))}}{{.ExifInfo.CameraMake}} {{end}}{{.ExifInfo.CameraModel}}</dd>{{end}}
                     {{if .ExifInfo.LensModel}}<dt>Lens</dt><dd>{{.ExifInfo.LensModel}}</dd>{{end}}
                     {{if .ExifInfo.FocalLength}}<dt>Focal Length</dt><dd>{{.ExifInfo.FocalLength}}{{if .ExifInfo.FocalLength35mm}} ({{.ExifInfo.FocalLength35mm}} eq.){{end}}</dd>{{end}}
                     {{if .ExifInfo.Aperture}}<dt>Aperture</dt><dd>{{.ExifInfo.Aperture}}</dd>{{end}}
