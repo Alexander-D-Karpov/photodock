@@ -26,7 +26,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Ensure required directories exist (fail fast if permissions are wrong)
 	if err := os.MkdirAll(cfg.MediaRoot, 0755); err != nil {
 		log.Fatalf("failed to create MEDIA_ROOT (%s): %v", cfg.MediaRoot, err)
 	}
@@ -48,6 +47,11 @@ func main() {
 	}
 
 	thumbService := services.NewThumbnailService(cfg.MediaRoot, cfg.CacheDir)
+
+	log.Println("Prewarming thumbnail cache...")
+	thumbService.PrewarmCache()
+	log.Println("Cache prewarm complete")
+
 	exifService := services.NewExifService()
 	scanService := services.NewScannerService(db, thumbService, exifService, cfg.MediaRoot)
 

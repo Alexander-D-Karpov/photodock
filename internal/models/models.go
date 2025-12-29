@@ -17,6 +17,7 @@ type Folder struct {
 	PhotoCount     int
 	SubfolderCount int
 	CoverURL       string
+	PreviewURLs    []string
 	Depth          int
 	HasChildren    bool
 	TotalSize      int64

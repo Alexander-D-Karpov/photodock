@@ -409,14 +409,67 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	thumbPath, err := h.thumbSvc.GetThumbnailPath(path, size)
+	thumbPath, err := h.thumbSvc.GetThumbnailPathByID(id, path, size)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 
-	w.Header().Set("Cache-Control", "public, max-age=31536000")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+
+	if r.Header.Get("X-Real-IP") != "" {
+		w.Header().Set("X-Accel-Redirect", fmt.Sprintf("/internal/cache/%s/%d%s", size, id, filepath.Ext(thumbPath)))
+		contentType := "image/jpeg"
+		if strings.HasSuffix(strings.ToLower(path), ".png") {
+			contentType = "image/png"
+		}
+		w.Header().Set("Content-Type", contentType)
+		return
+	}
+
 	http.ServeFile(w, r, thumbPath)
+}
+
+func (h *Handlers) servePlaceholder(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(r.PathValue("id"))
+
+	var blurhash string
+	if err := h.db.Pool().QueryRow(r.Context(), "SELECT COALESCE(blurhash, '') FROM photos WHERE id = $1", id).Scan(&blurhash); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	placeholderPath, err := h.thumbSvc.GetPlaceholderPathByID(id, blurhash)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+
+	if r.Header.Get("X-Real-IP") != "" {
+		w.Header().Set("X-Accel-Redirect", fmt.Sprintf("/internal/cache/placeholder/%d.png", id))
+		w.Header().Set("Content-Type", "image/png")
+		return
+	}
+
+	http.ServeFile(w, r, placeholderPath)
+}
+
+func (h *Handlers) adminDeletePhoto(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(r.PathValue("id"))
+	ctx := r.Context()
+
+	var path string
+	h.db.Pool().QueryRow(ctx, "SELECT path FROM photos WHERE id = $1", id).Scan(&path)
+	h.db.Pool().Exec(ctx, "DELETE FROM photos WHERE id = $1", id)
+
+	if path != "" {
+		h.thumbSvc.DeleteThumbnailsByID(id)
+		os.Remove(filepath.Join(h.cfg.MediaRoot, path))
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handlers) serveOriginal(w http.ResponseWriter, r *http.Request) {
@@ -430,27 +483,17 @@ func (h *Handlers) serveOriginal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Header.Get("X-Real-IP") != "" {
+		w.Header().Set("X-Accel-Redirect", "/internal/photos/"+path)
+		w.Header().Set("Content-Type", "image/jpeg")
+		if strings.HasSuffix(strings.ToLower(path), ".png") {
+			w.Header().Set("Content-Type", "image/png")
+		}
+		return
+	}
+
 	w.Header().Set("Cache-Control", "public, max-age=31536000")
 	http.ServeFile(w, r, filepath.Join(h.cfg.MediaRoot, path))
-}
-
-func (h *Handlers) servePlaceholder(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(r.PathValue("id"))
-
-	var path, blurhash string
-	if err := h.db.Pool().QueryRow(r.Context(), "SELECT path, COALESCE(blurhash, '') FROM photos WHERE id = $1", id).Scan(&path, &blurhash); err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	placeholderPath, err := h.thumbSvc.GetPlaceholderPath(path, blurhash)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	w.Header().Set("Cache-Control", "public, max-age=31536000")
-	http.ServeFile(w, r, placeholderPath)
 }
 
 func (h *Handlers) adminDashboard(w http.ResponseWriter, r *http.Request) {
@@ -700,22 +743,6 @@ func (h *Handlers) adminUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("title"), r.FormValue("description"), r.FormValue("note"), folderID, id)
 
 	http.Redirect(w, r, fmt.Sprintf("/admin/photos/%d", id), http.StatusSeeOther)
-}
-
-func (h *Handlers) adminDeletePhoto(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(r.PathValue("id"))
-	ctx := r.Context()
-
-	var path string
-	h.db.Pool().QueryRow(ctx, "SELECT path FROM photos WHERE id = $1", id).Scan(&path)
-	h.db.Pool().Exec(ctx, "DELETE FROM photos WHERE id = $1", id)
-
-	if path != "" {
-		h.thumbSvc.DeleteThumbnails(path)
-		os.Remove(filepath.Join(h.cfg.MediaRoot, path))
-	}
-
-	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handlers) adminToggleHide(w http.ResponseWriter, r *http.Request) {
@@ -1161,8 +1188,10 @@ func (h *Handlers) getFoldersWithCounts(ctx context.Context, where string) ([]mo
 			(SELECT COUNT(*) FROM photos WHERE folder_id = f.id AND hidden = false) as photo_count,
 			(SELECT COUNT(*) FROM folders WHERE parent_id = f.id) as subfolder_count,
 			(SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE folder_id = f.id AND hidden = false) as total_size,
-			COALESCE(f.cover_photo_id, (SELECT p.id FROM photos p WHERE p.folder_id = f.id AND p.hidden = false 
-				ORDER BY COALESCE(p.taken_at, p.created_at) DESC, p.id DESC LIMIT 1)) as first_photo_id
+			(SELECT ARRAY(
+				SELECT p.id FROM photos p WHERE p.folder_id = f.id AND p.hidden = false 
+				ORDER BY COALESCE(p.taken_at, p.created_at) DESC, p.id DESC LIMIT 4
+			)) as preview_ids
 		FROM folders f WHERE %s ORDER BY f.created_at DESC`, where)
 
 	rows, err := h.db.Pool().Query(ctx, query)
@@ -1174,11 +1203,15 @@ func (h *Handlers) getFoldersWithCounts(ctx context.Context, where string) ([]mo
 	var folders []models.Folder
 	for rows.Next() {
 		var f models.Folder
-		var firstPhotoID sql.NullInt64
+		var previewIDs []int64
 		rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path, &f.CoverPhotoID, &f.CreatedAt,
-			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &firstPhotoID)
-		if firstPhotoID.Valid {
-			f.CoverURL = fmt.Sprintf("/thumb/small/%d", firstPhotoID.Int64)
+			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &previewIDs)
+
+		for _, pid := range previewIDs {
+			f.PreviewURLs = append(f.PreviewURLs, fmt.Sprintf("/thumb/small/%d", pid))
+		}
+		if len(f.PreviewURLs) > 0 {
+			f.CoverURL = f.PreviewURLs[0]
 		}
 		folders = append(folders, f)
 	}

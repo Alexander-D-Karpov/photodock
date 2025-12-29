@@ -1,7 +1,6 @@
 package services
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"image"
@@ -11,32 +10,41 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/disintegration/imaging"
 )
 
 type ThumbnailService struct {
-	mediaRoot string
-	cacheDir  string
+	mediaRoot   string
+	cacheDir    string
+	existsCache sync.Map
 }
 
 func NewThumbnailService(mediaRoot, cacheDir string) *ThumbnailService {
 	os.MkdirAll(filepath.Join(cacheDir, "small"), 0755)
 	os.MkdirAll(filepath.Join(cacheDir, "medium"), 0755)
 	os.MkdirAll(filepath.Join(cacheDir, "large"), 0755)
-	return &ThumbnailService{mediaRoot: mediaRoot, cacheDir: cacheDir}
+	os.MkdirAll(filepath.Join(cacheDir, "placeholder"), 0755)
+	return &ThumbnailService{
+		mediaRoot: mediaRoot,
+		cacheDir:  cacheDir,
+	}
 }
 
-func (s *ThumbnailService) GetThumbnailPath(photoPath, size string) (string, error) {
-	hash := sha256.Sum256([]byte(photoPath))
-	hashStr := fmt.Sprintf("%x", hash[:16])
+func (s *ThumbnailService) GetThumbnailPathByID(photoID int, photoPath, size string) (string, error) {
 	ext := ".jpg"
 	if strings.HasSuffix(strings.ToLower(photoPath), ".png") {
 		ext = ".png"
 	}
-	thumbPath := filepath.Join(s.cacheDir, size, hashStr+ext)
+	thumbPath := filepath.Join(s.cacheDir, size, fmt.Sprintf("%d%s", photoID, ext))
+
+	if _, ok := s.existsCache.Load(thumbPath); ok {
+		return thumbPath, nil
+	}
 
 	if _, err := os.Stat(thumbPath); err == nil {
+		s.existsCache.Store(thumbPath, struct{}{})
 		return thumbPath, nil
 	}
 
@@ -45,6 +53,7 @@ func (s *ThumbnailService) GetThumbnailPath(photoPath, size string) (string, err
 		return "", err
 	}
 
+	s.existsCache.Store(thumbPath, struct{}{})
 	return thumbPath, nil
 }
 
@@ -55,15 +64,20 @@ func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string) erro
 	}
 
 	var width int
+	var quality int
 	switch size {
 	case "small":
 		width = 300
+		quality = 80
 	case "medium":
 		width = 800
+		quality = 85
 	case "large":
-		width = 1920
+		width = 1440
+		quality = 85
 	default:
 		width = 300
+		quality = 80
 	}
 
 	thumb := imaging.Resize(img, width, 0, imaging.Lanczos)
@@ -71,7 +85,7 @@ func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string) erro
 	if strings.HasSuffix(strings.ToLower(dstPath), ".png") {
 		return imaging.Save(thumb, dstPath)
 	}
-	return imaging.Save(thumb, dstPath, imaging.JPEGQuality(90))
+	return imaging.Save(thumb, dstPath, imaging.JPEGQuality(quality))
 }
 
 func (s *ThumbnailService) GenerateBlurhash(photoPath string) (string, error) {
@@ -135,16 +149,17 @@ func (s *ThumbnailService) GeneratePlaceholder(blurhash string, width, height in
 	return imaging.Resize(tiny, width, height, imaging.Linear), nil
 }
 
-func (s *ThumbnailService) GetPlaceholderPath(photoPath string, blurhash string) (string, error) {
-	hash := sha256.Sum256([]byte(photoPath))
-	hashStr := fmt.Sprintf("%x", hash[:16])
-	placeholderPath := filepath.Join(s.cacheDir, "placeholder", hashStr+".png")
+func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string) (string, error) {
+	placeholderPath := filepath.Join(s.cacheDir, "placeholder", fmt.Sprintf("%d.png", photoID))
 
-	if _, err := os.Stat(placeholderPath); err == nil {
+	if _, ok := s.existsCache.Load(placeholderPath); ok {
 		return placeholderPath, nil
 	}
 
-	os.MkdirAll(filepath.Join(s.cacheDir, "placeholder"), 0755)
+	if _, err := os.Stat(placeholderPath); err == nil {
+		s.existsCache.Store(placeholderPath, struct{}{})
+		return placeholderPath, nil
+	}
 
 	img, err := s.GeneratePlaceholder(blurhash, 32, 32)
 	if err != nil {
@@ -157,20 +172,38 @@ func (s *ThumbnailService) GetPlaceholderPath(photoPath string, blurhash string)
 	}
 	defer f.Close()
 
-	return placeholderPath, png.Encode(f, img)
+	if err := png.Encode(f, img); err != nil {
+		return "", err
+	}
+
+	s.existsCache.Store(placeholderPath, struct{}{})
+	return placeholderPath, nil
 }
 
-func (s *ThumbnailService) DeleteThumbnails(photoPath string) error {
-	hash := sha256.Sum256([]byte(photoPath))
-	hashStr := fmt.Sprintf("%x", hash[:16])
-
-	for _, size := range []string{"small", "medium", "placeholder"} {
+func (s *ThumbnailService) DeleteThumbnailsByID(photoID int) error {
+	for _, size := range []string{"small", "medium", "large", "placeholder"} {
 		for _, ext := range []string{".jpg", ".png"} {
-			path := filepath.Join(s.cacheDir, size, hashStr+ext)
+			path := filepath.Join(s.cacheDir, size, fmt.Sprintf("%d%s", photoID, ext))
 			os.Remove(path)
+			s.existsCache.Delete(path)
 		}
 	}
 	return nil
+}
+
+func (s *ThumbnailService) PrewarmCache() {
+	for _, size := range []string{"small", "medium", "large", "placeholder"} {
+		dir := filepath.Join(s.cacheDir, size)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				s.existsCache.Store(filepath.Join(dir, entry.Name()), struct{}{})
+			}
+		}
+	}
 }
 
 func (s *ThumbnailService) CacheDir() string {

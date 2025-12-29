@@ -92,9 +92,11 @@
                 <div class="folders-grid">
                     {{range .Subfolders}}
                     <a href="/p/{{urlpath .Path}}/" class="folder-card" data-name="{{.Name}}" data-date="{{.CreatedAt.Unix}}">
-                        <div class="folder-cover">
-                            {{if .CoverURL}}
-                            <img src="{{.CoverURL}}" alt="{{.Name}}" loading="lazy">
+                        <div class="folder-cover {{if not .PreviewURLs}}empty{{else if eq (len .PreviewURLs) 1}}count-1{{else if eq (len .PreviewURLs) 2}}count-2{{else if eq (len .PreviewURLs) 3}}count-3{{else}}count-4{{end}}">
+                        {{if .PreviewURLs}}
+                            {{range .PreviewURLs}}
+                            <img src="{{.}}" alt="" loading="lazy">
+                            {{end}}
                             {{else}}
                             {{template "icon-folder"}}
                             {{end}}

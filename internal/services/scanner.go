@@ -105,10 +105,6 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 	width, height, _ := s.thumbSvc.GetImageDimensions(relPath)
 	blurhash, _ := s.thumbSvc.GenerateBlurhash(relPath)
 
-	s.thumbSvc.GetThumbnailPath(relPath, "small")
-	s.thumbSvc.GetThumbnailPath(relPath, "medium")
-	s.thumbSvc.GetThumbnailPath(relPath, "large")
-
 	var exifJSON []byte
 	if exifInfo != nil {
 		exifJSON, _ = json.Marshal(exifInfo)
@@ -121,13 +117,23 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 
 	urlPath := s.generateURLPath(ctx, relPath)
 
-	_, err = s.db.Pool().Exec(ctx,
+	var photoID int
+	err = s.db.Pool().QueryRow(ctx,
 		`INSERT INTO photos (folder_id, filename, path, url_path, width, height, size_bytes, blurhash, exif_data, taken_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (path) DO UPDATE SET url_path = COALESCE(photos.url_path, EXCLUDED.url_path)`,
-		folderID, filepath.Base(relPath), relPath, urlPath, width, height, info.Size(), blurhash, exifJSON, takenAtPtr)
+		ON CONFLICT (path) DO UPDATE SET url_path = COALESCE(photos.url_path, EXCLUDED.url_path)
+		RETURNING id`,
+		folderID, filepath.Base(relPath), relPath, urlPath, width, height, info.Size(), blurhash, exifJSON, takenAtPtr).Scan(&photoID)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "small")
+	s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "medium")
+	s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "large")
+
+	return nil
 }
 
 func (s *ScannerService) generateURLPath(ctx context.Context, filePath string) string {
