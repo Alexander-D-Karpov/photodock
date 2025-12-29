@@ -1,0 +1,58 @@
+# Binaries
+photodock
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+/bin/
+/dist/
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+go.work.sum
+
+# Coverage
+*.out
+coverage.html
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Cache and generated files
+/media/cache/
+*.cache
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Uploaded during development
+/media/photos/

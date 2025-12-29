@@ -16,13 +16,20 @@
             <nav class="breadcrumbs">
                 <a href="/">/</a>
                 {{range .Breadcrumbs}}
-                <a href="/folder/{{.ID}}">{{.Name}}</a>
+                <a href="/p/{{urlpath .Path}}/">{{.Name}}</a>
                 <span class="separator">/</span>
                 {{end}}
                 <span>{{.Photo.Filename}}</span>
             </nav>
         </div>
         <div class="viewer-header-right">
+            {{if .PrevURL}}
+            <a href="{{.PrevURL}}" class="btn-icon header-nav-btn" title="Previous (←)">{{template "icon-chevron-left"}}</a>
+            {{end}}
+            {{if .NextURL}}
+            <a href="{{.NextURL}}" class="btn-icon header-nav-btn" title="Next (→)">{{template "icon-chevron-right"}}</a>
+            {{end}}
+
             {{if .PhotoPosition}}
             <span class="photo-counter">{{.PhotoPosition}} of {{.PhotoTotal}}</span>
             {{end}}

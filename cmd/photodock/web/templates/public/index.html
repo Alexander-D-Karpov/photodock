@@ -45,7 +45,7 @@
             <tr class="folder-row" data-name="{{.Name}}" data-size="{{.TotalSize}}" data-date="{{.CreatedAt.Unix}}">
                 <td class="col-icon">{{template "icon-folder-small"}}</td>
                 <td class="col-name">
-                    <a href="/folder/{{.ID}}">{{.Name}}/</a>
+                    <a href="/p/{{urlpath .Path}}/">{{.Name}}/</a>
                     <span class="item-meta">{{.PhotoCount}} photos{{if .SubfolderCount}}, {{.SubfolderCount}} folders{{end}}</span>
                 </td>
                 <td class="col-size">{{if gt .TotalSize 0}}{{formatSize .TotalSize}}{{else}}-{{end}}</td>
@@ -74,7 +74,7 @@
                 <h2>Folders</h2>
                 <div class="folders-grid">
                     {{range .Folders}}
-                    <a href="/folder/{{.ID}}" class="folder-card" data-name="{{.Name}}" data-date="{{.CreatedAt.Unix}}">
+                    <a href="/p/{{urlpath .Path}}/" class="folder-card" data-name="{{.Name}}" data-date="{{.CreatedAt.Unix}}">
                         <div class="folder-cover">
                             {{if .CoverURL}}
                             <img src="{{.CoverURL}}" alt="{{.Name}}" loading="lazy">

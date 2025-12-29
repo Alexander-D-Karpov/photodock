@@ -205,7 +205,6 @@ a:hover { text-decoration: underline; }
 }
 
 .nav-btn {
-    pointer-events: auto;
     width: 80px;
     display: flex;
     align-items: center;
@@ -215,17 +214,25 @@ a:hover { text-decoration: underline; }
     opacity: 0;
     transition: opacity 0.2s, background 0.2s, color 0.2s;
     text-decoration: none;
+    pointer-events: none;
 }
 
-.nav-btn:hover {
+a.nav-btn {
+    pointer-events: auto;
+}
+
+a.nav-btn:hover {
     background: rgba(0,0,0,0.5);
     color: #fff;
     opacity: 1;
     text-decoration: none;
 }
 
+.viewer-body:hover a.nav-btn {
+    opacity: 1;
+}
+
 .nav-btn svg { width: 40px; height: 40px; }
-.viewer-body:hover .nav-btn { opacity: 1; }
 
 .viewer-sidebar {
     width: 320px;

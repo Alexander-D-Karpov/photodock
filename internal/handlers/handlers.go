@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -60,9 +61,10 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 		"formatDate": func(t time.Time) string {
 			return t.Format("2006-01-02 15:04")
 		},
-		"add":   func(a, b int) int { return a + b },
-		"sub":   func(a, b int) int { return a - b },
-		"int64": func(i int) int64 { return int64(i) },
+		"add":     func(a, b int) int { return a + b },
+		"sub":     func(a, b int) int { return a - b },
+		"int64":   func(i int) int64 { return int64(i) },
+		"urlpath": escapeURLPath,
 		"iterate": func(n int) []int {
 			result := make([]int, n)
 			for i := range result {
@@ -142,7 +144,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /", h.publicIndex)
 	mux.HandleFunc("GET /folder/{id}", h.publicFolder)
-	mux.HandleFunc("GET /p/{path...}", h.publicPhotoByPath)
+	mux.HandleFunc("GET /p/{path...}", h.publicPath)
 	mux.HandleFunc("GET /photo/{id}", h.publicPhotoByID)
 	mux.HandleFunc("GET /thumb/{size}/{id}", h.serveThumbnail)
 	mux.HandleFunc("GET /original/{id}", h.serveOriginal)
@@ -214,24 +216,83 @@ func (h *Handlers) publicFolder(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
 	ctx := r.Context()
 
-	var folder models.Folder
-	err := h.db.Pool().QueryRow(ctx,
-		"SELECT id, parent_id, name, path FROM folders WHERE id = $1", id).
-		Scan(&folder.ID, &folder.ParentID, &folder.Name, &folder.Path)
+	var folderPath string
+	if err := h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", id).Scan(&folderPath); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	http.Redirect(w, r, "/p/"+escapeURLPath(folderPath)+"/", http.StatusMovedPermanently)
+}
+
+func (h *Handlers) publicPath(w http.ResponseWriter, r *http.Request) {
+	raw := r.PathValue("path")
+	if raw == "" {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		return
+	}
+
+	isFolderReq := strings.HasSuffix(r.URL.Path, "/")
+	cleaned := strings.Trim(raw, "/")
+	if cleaned == "" {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		return
+	}
+
+	if isFolderReq {
+		folder, err := h.getFolderByPath(r.Context(), cleaned)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		h.renderFolder(w, r, folder)
+		return
+	}
+
+	if _, err := h.getFolderByPath(r.Context(), cleaned); err == nil {
+		http.Redirect(w, r, "/p/"+escapeURLPath(cleaned)+"/", http.StatusMovedPermanently)
+		return
+	}
+
+	photo, err := h.getPhotoByURLPath(r.Context(), cleaned)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
+	h.renderPhoto(w, r, photo)
+}
 
-	subfolders, _ := h.getSubfolders(ctx, id)
-	photos, _ := h.getFolderPhotos(ctx, id)
-	breadcrumbs := h.getBreadcrumbs(ctx, &folder)
+func (h *Handlers) getFolderByPath(ctx context.Context, path string) (*models.Folder, error) {
+	var folder models.Folder
+	err := h.db.Pool().QueryRow(ctx,
+		"SELECT id, parent_id, name, path FROM folders WHERE path = $1", path).
+		Scan(&folder.ID, &folder.ParentID, &folder.Name, &folder.Path)
+	if err != nil {
+		return nil, err
+	}
+	return &folder, nil
+}
+
+func (h *Handlers) renderFolder(w http.ResponseWriter, r *http.Request, folder *models.Folder) {
+	ctx := r.Context()
+
+	subfolders, _ := h.getSubfolders(ctx, folder.ID)
+	photos, _ := h.getFolderPhotos(ctx, folder.ID)
+	breadcrumbs := h.getBreadcrumbs(ctx, folder)
+
+	parentURL := "/"
+	if folder.ParentID.Valid {
+		var parentPath string
+		if err := h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", folder.ParentID.Int64).Scan(&parentPath); err == nil {
+			parentURL = "/p/" + escapeURLPath(parentPath) + "/"
+		}
+	}
 
 	h.render(w, "public/folder.html", map[string]interface{}{
-		"Folder":      folder,
+		"Folder":      *folder,
 		"Subfolders":  subfolders,
 		"Photos":      photos,
 		"Breadcrumbs": breadcrumbs,
+		"ParentURL":   parentURL,
 		"Title":       folder.Name,
 	})
 }
@@ -286,11 +347,9 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		title = photo.Title.String
 	}
 
-	var folderURL string
-	if photo.FolderID.Valid {
-		folderURL = fmt.Sprintf("/folder/%d", photo.FolderID.Int64)
-	} else {
-		folderURL = "/"
+	folderURL := "/"
+	if len(breadcrumbs) > 0 {
+		folderURL = "/p/" + escapeURLPath(breadcrumbs[len(breadcrumbs)-1].Path) + "/"
 	}
 
 	h.render(w, "public/photo.html", map[string]interface{}{
@@ -306,6 +365,14 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		"PhotoPosition": position,
 		"PhotoTotal":    total,
 	})
+}
+
+func escapeURLPath(p string) string {
+	parts := strings.Split(p, "/")
+	for i := range parts {
+		parts[i] = url.PathEscape(parts[i])
+	}
+	return strings.Join(parts, "/")
 }
 
 func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
@@ -980,19 +1047,40 @@ func (h *Handlers) getAdjacentPhotoInfo(ctx context.Context, photo *models.Photo
 		URLPath string
 	}
 
-	h.db.Pool().QueryRow(ctx,
-		`SELECT id, COALESCE(url_path, '') FROM photos 
-		WHERE folder_id IS NOT DISTINCT FROM $1 AND hidden = false 
-		AND (COALESCE(taken_at, created_at), id) < (COALESCE($2, $3), $4) 
-		ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT 1`,
-		photo.FolderID, photo.TakenAt, photo.CreatedAt, photo.ID).Scan(&prev.ID, &prev.URLPath)
+	sortTime := photo.CreatedAt
+	if photo.TakenAt.Valid {
+		sortTime = photo.TakenAt.Time
+	}
 
-	h.db.Pool().QueryRow(ctx,
-		`SELECT id, COALESCE(url_path, '') FROM photos 
-		WHERE folder_id IS NOT DISTINCT FROM $1 AND hidden = false 
-		AND (COALESCE(taken_at, created_at), id) > (COALESCE($2, $3), $4) 
-		ORDER BY COALESCE(taken_at, created_at) ASC, id ASC LIMIT 1`,
-		photo.FolderID, photo.TakenAt, photo.CreatedAt, photo.ID).Scan(&next.ID, &next.URLPath)
+	if photo.FolderID.Valid {
+		h.db.Pool().QueryRow(ctx,
+			`SELECT id, COALESCE(url_path, '') FROM photos 
+			WHERE folder_id = $1 AND hidden = false 
+			AND (COALESCE(taken_at, created_at) > $2 OR (COALESCE(taken_at, created_at) = $2 AND id > $3))
+			ORDER BY COALESCE(taken_at, created_at) ASC, id ASC LIMIT 1`,
+			photo.FolderID.Int64, sortTime, photo.ID).Scan(&prev.ID, &prev.URLPath)
+
+		h.db.Pool().QueryRow(ctx,
+			`SELECT id, COALESCE(url_path, '') FROM photos 
+			WHERE folder_id = $1 AND hidden = false 
+			AND (COALESCE(taken_at, created_at) < $2 OR (COALESCE(taken_at, created_at) = $2 AND id < $3))
+			ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT 1`,
+			photo.FolderID.Int64, sortTime, photo.ID).Scan(&next.ID, &next.URLPath)
+	} else {
+		h.db.Pool().QueryRow(ctx,
+			`SELECT id, COALESCE(url_path, '') FROM photos 
+			WHERE folder_id IS NULL AND hidden = false 
+			AND (COALESCE(taken_at, created_at) > $1 OR (COALESCE(taken_at, created_at) = $1 AND id > $2))
+			ORDER BY COALESCE(taken_at, created_at) ASC, id ASC LIMIT 1`,
+			sortTime, photo.ID).Scan(&prev.ID, &prev.URLPath)
+
+		h.db.Pool().QueryRow(ctx,
+			`SELECT id, COALESCE(url_path, '') FROM photos 
+			WHERE folder_id IS NULL AND hidden = false 
+			AND (COALESCE(taken_at, created_at) < $1 OR (COALESCE(taken_at, created_at) = $1 AND id < $2))
+			ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT 1`,
+			sortTime, photo.ID).Scan(&next.ID, &next.URLPath)
+	}
 
 	if prev.ID > 0 {
 		prevID = prev.ID
