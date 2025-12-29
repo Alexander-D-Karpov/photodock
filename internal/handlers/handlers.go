@@ -379,7 +379,7 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	size := r.PathValue("size")
 	id, _ := strconv.Atoi(r.PathValue("id"))
 
-	if size != "small" && size != "medium" {
+	if size != "small" && size != "medium" && size != "large" {
 		http.NotFound(w, r)
 		return
 	}

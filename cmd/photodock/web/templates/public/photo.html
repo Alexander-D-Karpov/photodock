@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/css/style.css">
     {{if .NextURL}}<link rel="prefetch" href="{{.NextURL}}">{{end}}
     {{if .PrevURL}}<link rel="prefetch" href="{{.PrevURL}}">{{end}}
+    <link rel="preload" href="/thumb/large/{{.Photo.ID}}" as="image">
 </head>
 <body>
 <div class="viewer-container">
@@ -33,6 +34,12 @@
             {{if .PhotoPosition}}
             <span class="photo-counter">{{.PhotoPosition}} of {{.PhotoTotal}}</span>
             {{end}}
+            <a href="/original/{{.Photo.ID}}" target="_blank" class="btn-icon" title="View original ({{formatSize .Photo.SizeBytes}})">
+                {{template "icon-external"}}
+            </a>
+            <a href="/original/{{.Photo.ID}}" download="{{.Photo.Filename}}" class="btn-icon" title="Download original">
+                {{template "icon-download"}}
+            </a>
             <button class="btn-icon close-btn" onclick="goBack()" title="Close (Esc)">
                 {{template "icon-close"}}
             </button>
@@ -47,7 +54,7 @@
             </div>
 
             <div class="viewer-image">
-                <img src="/original/{{.Photo.ID}}" alt="{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{else}}{{.Photo.Filename}}{{end}}" id="main-image">
+                <img src="/thumb/large/{{.Photo.ID}}" alt="{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{else}}{{.Photo.Filename}}{{end}}" id="main-image" data-original="/original/{{.Photo.ID}}">
             </div>
         </div>
 
@@ -97,6 +104,10 @@
                     <dt>Path</dt><dd class="path-value">/p/{{.Photo.URLPath}}</dd>
                 </dl>
 
+                <div class="sidebar-actions">
+                    <a href="/original/{{.Photo.ID}}" target="_blank" class="btn btn-secondary">{{template "icon-external"}} View Original</a>
+                    <a href="/original/{{.Photo.ID}}" download="{{.Photo.Filename}}" class="btn btn-secondary">{{template "icon-download"}} Download</a>
+                </div>
             </div>
         </aside>
     </div>

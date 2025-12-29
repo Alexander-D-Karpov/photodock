@@ -107,6 +107,7 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 
 	s.thumbSvc.GetThumbnailPath(relPath, "small")
 	s.thumbSvc.GetThumbnailPath(relPath, "medium")
+	s.thumbSvc.GetThumbnailPath(relPath, "large")
 
 	var exifJSON []byte
 	if exifInfo != nil {

@@ -23,6 +23,7 @@ type ThumbnailService struct {
 func NewThumbnailService(mediaRoot, cacheDir string) *ThumbnailService {
 	os.MkdirAll(filepath.Join(cacheDir, "small"), 0755)
 	os.MkdirAll(filepath.Join(cacheDir, "medium"), 0755)
+	os.MkdirAll(filepath.Join(cacheDir, "large"), 0755)
 	return &ThumbnailService{mediaRoot: mediaRoot, cacheDir: cacheDir}
 }
 
@@ -59,6 +60,8 @@ func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string) erro
 		width = 300
 	case "medium":
 		width = 800
+	case "large":
+		width = 1920
 	default:
 		width = 300
 	}
@@ -68,7 +71,7 @@ func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string) erro
 	if strings.HasSuffix(strings.ToLower(dstPath), ".png") {
 		return imaging.Save(thumb, dstPath)
 	}
-	return imaging.Save(thumb, dstPath, imaging.JPEGQuality(85))
+	return imaging.Save(thumb, dstPath, imaging.JPEGQuality(90))
 }
 
 func (s *ThumbnailService) GenerateBlurhash(photoPath string) (string, error) {

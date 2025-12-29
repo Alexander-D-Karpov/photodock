@@ -1378,3 +1378,21 @@ a.nav-btn:hover {
         gap: 8px;
     }
 }
+
+.sidebar-actions {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sidebar-actions .btn {
+    justify-content: center;
+}
+
+.header-nav-btn svg {
+    width: 20px;
+    height: 20px;
+}
