@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/admin.css">
 </head>
 <body>
 <div class="admin-container">
@@ -69,13 +69,17 @@
                 </label>
             </div>
 
-            <div class="upload-queue" id="upload-queue" style="display: none;">
-                <h3>Upload Progress</h3>
-                <div class="queue-list" id="queue-list"></div>
-                <div class="upload-summary">
-                    <span id="upload-status">Ready</span>
-                    <button class="btn btn-small" id="start-upload" onclick="startUpload()">Start Upload</button>
-                    <button class="btn btn-small btn-secondary" id="clear-queue" onclick="clearQueue()">Clear</button>
+            <div class="upload-preview-section" id="upload-preview-section">
+                <div class="upload-preview-header">
+                    <h3>Selected Files</h3>
+                    <div class="upload-preview-actions">
+                        <button class="btn btn-small btn-secondary" id="clear-upload" onclick="clearUpload()">Clear All</button>
+                        <button class="btn btn-small btn-primary" id="start-upload" onclick="startUpload()">Upload All</button>
+                    </div>
+                </div>
+                <div class="upload-preview-grid" id="upload-preview-grid"></div>
+                <div class="upload-status-bar">
+                    <span class="status-text" id="upload-status-text">No files selected</span>
                 </div>
             </div>
         </div>

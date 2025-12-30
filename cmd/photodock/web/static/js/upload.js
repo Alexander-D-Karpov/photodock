@@ -8,10 +8,12 @@
 
     const uploadZone = document.getElementById('upload-zone');
     const fileInput = document.getElementById('file-input');
-    const queueContainer = document.getElementById('upload-queue');
-    const queueList = document.getElementById('queue-list');
-    const statusEl = document.getElementById('upload-status');
+    const previewSection = document.getElementById('upload-preview-section');
+    const previewGrid = document.getElementById('upload-preview-grid');
+    const statusText = document.getElementById('upload-status-text');
     const folderSelect = document.getElementById('upload-folder');
+    const startBtn = document.getElementById('start-upload');
+    const clearBtn = document.getElementById('clear-upload');
 
     if (!uploadZone) return;
 
@@ -37,6 +39,20 @@
         fileInput.value = '';
     });
 
+    if (previewGrid) {
+        previewGrid.addEventListener('click', (e) => {
+            const removeBtn = e.target.closest('.remove-btn');
+            if (removeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const previewItem = removeBtn.closest('.upload-preview-item');
+                if (previewItem && previewItem.dataset.uploadId) {
+                    removeFromUpload(previewItem.dataset.uploadId);
+                }
+            }
+        });
+    }
+
     function handleFiles(files) {
         const validFiles = Array.from(files).filter(f =>
             f.type === 'image/jpeg' || f.type === 'image/png'
@@ -48,92 +64,98 @@
         }
 
         validFiles.forEach(file => {
-            const id = Date.now() + Math.random().toString(36).substr(2, 9);
-            uploadQueue.push({
+            const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+            const item = {
                 id,
                 file,
                 progress: 0,
                 status: 'pending',
-                error: null
-            });
-            addQueueItem(id, file);
+                error: null,
+                previewUrl: null
+            };
+
+            uploadQueue.push(item);
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                item.previewUrl = e.target.result;
+                addPreviewItem(item);
+            };
+            reader.readAsDataURL(file);
         });
 
-        queueContainer.style.display = 'block';
-        updateStatus();
+        updateUI();
     }
 
-    function addQueueItem(id, file) {
-        const item = document.createElement('div');
-        item.className = 'queue-item';
-        item.id = `queue-${id}`;
-        item.innerHTML = `
-            <div class="queue-item-info">
-                <span class="queue-item-name">${escapeHtml(file.name)}</span>
-                <span class="queue-item-size">${formatSize(file.size)}</span>
-            </div>
-            <div class="queue-item-progress">
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: 0%"></div>
-                </div>
-                <span class="progress-text">0%</span>
-            </div>
-            <div class="queue-item-status">
-                <span class="status-text">Pending</span>
-                <button class="btn-icon remove-btn" onclick="removeFromQueue('${id}')" title="Remove">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
+    function addPreviewItem(item) {
+        const div = document.createElement('div');
+        div.className = 'upload-preview-item';
+        div.id = `preview-${item.id}`;
+        div.dataset.uploadId = item.id;
+        div.innerHTML = `
+            <img src="${item.previewUrl}" alt="${escapeHtml(item.file.name)}">
+            <button class="remove-btn" type="button" title="Remove">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+            <div class="file-info">${escapeHtml(item.file.name)}</div>
+            <div class="progress-overlay">
+                <div class="progress-circle"></div>
+                <div class="progress-text">0%</div>
             </div>
         `;
-        queueList.appendChild(item);
+        previewGrid.appendChild(div);
     }
 
-    function updateQueueItem(id, progress, status, error) {
-        const item = document.getElementById(`queue-${id}`);
+    function removeFromUpload(id) {
+        const idx = uploadQueue.findIndex(item => item.id === id);
+        if (idx === -1) return;
+
+        if (uploadQueue[idx].status !== 'pending') return;
+
+        uploadQueue.splice(idx, 1);
+        const element = document.getElementById(`preview-${id}`);
+        if (element) {
+            element.remove();
+        }
+        updateUI();
+    }
+
+    function updatePreviewItem(id, progress, status) {
+        const item = document.getElementById(`preview-${id}`);
         if (!item) return;
 
-        const progressFill = item.querySelector('.progress-fill');
         const progressText = item.querySelector('.progress-text');
-        const statusText = item.querySelector('.status-text');
 
-        progressFill.style.width = `${progress}%`;
-        progressText.textContent = `${Math.round(progress)}%`;
-
-        item.className = `queue-item ${status}`;
+        item.classList.remove('pending', 'uploading', 'complete', 'error');
+        item.classList.add(status);
 
         if (status === 'uploading') {
-            statusText.textContent = 'Uploading...';
+            progressText.textContent = `${Math.round(progress)}%`;
         } else if (status === 'complete') {
-            statusText.textContent = 'Complete';
-            progressFill.style.background = 'var(--success)';
+            progressText.textContent = '✓';
         } else if (status === 'error') {
-            statusText.textContent = error || 'Error';
-            progressFill.style.background = 'var(--danger)';
+            progressText.textContent = '✕';
         }
     }
 
-    window.removeFromQueue = function(id) {
-        const idx = uploadQueue.findIndex(item => item.id === id);
-        if (idx !== -1 && uploadQueue[idx].status === 'pending') {
-            uploadQueue.splice(idx, 1);
-            document.getElementById(`queue-${id}`)?.remove();
-            updateStatus();
-        }
-    };
-
     window.startUpload = function() {
-        if (isUploading) return;
+        if (isUploading || uploadQueue.length === 0) return;
+
+        const pending = uploadQueue.filter(i => i.status === 'pending');
+        if (pending.length === 0) return;
+
         isUploading = true;
-        document.getElementById('start-upload').disabled = true;
+        if (startBtn) startBtn.disabled = true;
         processQueue();
     };
 
-    window.clearQueue = function() {
+    window.clearUpload = function() {
         if (isUploading) return;
         uploadQueue = [];
-        queueList.innerHTML = '';
-        queueContainer.style.display = 'none';
-        updateStatus();
+        if (previewGrid) previewGrid.innerHTML = '';
+        updateUI();
     };
 
     function processQueue() {
@@ -141,14 +163,19 @@
 
         if (pending.length === 0 && activeUploads === 0) {
             isUploading = false;
-            document.getElementById('start-upload').disabled = false;
-            updateStatus();
+            if (startBtn) startBtn.disabled = false;
+            updateUI();
 
             const complete = uploadQueue.filter(item => item.status === 'complete').length;
             const errors = uploadQueue.filter(item => item.status === 'error').length;
 
             if (complete > 0) {
-                alert(`Upload complete! ${complete} files uploaded${errors > 0 ? `, ${errors} failed` : ''}.`);
+                setTimeout(() => {
+                    alert(`Upload complete! ${complete} files uploaded${errors > 0 ? `, ${errors} failed` : ''}.`);
+                    if (errors === 0) {
+                        window.clearUpload();
+                    }
+                }, 500);
             }
             return;
         }
@@ -156,15 +183,16 @@
         while (activeUploads < MAX_CONCURRENT && pending.length > 0) {
             const item = pending.shift();
             item.status = 'uploading';
+            updatePreviewItem(item.id, 0, 'uploading');
             activeUploads++;
             uploadFile(item);
         }
 
-        updateStatus();
+        updateUI();
     }
 
     async function uploadFile(item) {
-        const folderId = folderSelect.value;
+        const folderId = folderSelect ? folderSelect.value : '';
 
         try {
             if (item.file.size <= CHUNK_SIZE) {
@@ -175,11 +203,11 @@
 
             item.status = 'complete';
             item.progress = 100;
-            updateQueueItem(item.id, 100, 'complete');
+            updatePreviewItem(item.id, 100, 'complete');
         } catch (err) {
             item.status = 'error';
             item.error = err.message;
-            updateQueueItem(item.id, item.progress, 'error', err.message);
+            updatePreviewItem(item.id, item.progress, 'error');
         }
 
         activeUploads--;
@@ -198,7 +226,7 @@
                 if (e.lengthComputable) {
                     const progress = (e.loaded / e.total) * 100;
                     item.progress = progress;
-                    updateQueueItem(item.id, progress, 'uploading');
+                    updatePreviewItem(item.id, progress, 'uploading');
                 }
             };
 
@@ -230,7 +258,7 @@
 
             const progress = ((i + 1) / totalChunks) * 100;
             item.progress = progress;
-            updateQueueItem(item.id, progress, 'uploading');
+            updatePreviewItem(item.id, progress, 'uploading');
         }
 
         await finalizeUpload(uploadId);
@@ -272,25 +300,35 @@
         if (!res.ok) throw new Error('Failed to finalize upload');
     }
 
-    function updateStatus() {
+    function updateUI() {
         const pending = uploadQueue.filter(i => i.status === 'pending').length;
         const uploading = uploadQueue.filter(i => i.status === 'uploading').length;
         const complete = uploadQueue.filter(i => i.status === 'complete').length;
         const errors = uploadQueue.filter(i => i.status === 'error').length;
+        const total = uploadQueue.length;
 
-        if (isUploading) {
-            statusEl.textContent = `Uploading ${uploading} of ${uploadQueue.length}...`;
-        } else if (complete > 0 || errors > 0) {
-            statusEl.textContent = `${complete} complete, ${errors} errors, ${pending} pending`;
-        } else {
-            statusEl.textContent = `${pending} files ready`;
+        if (previewSection) {
+            previewSection.classList.toggle('has-files', total > 0);
         }
-    }
 
-    function formatSize(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        if (statusText) {
+            if (isUploading) {
+                statusText.textContent = `Uploading ${uploading} of ${total - complete - errors}...`;
+            } else if (total === 0) {
+                statusText.textContent = 'No files selected';
+            } else if (complete > 0 || errors > 0) {
+                statusText.textContent = `${complete} uploaded, ${errors} failed, ${pending} pending`;
+            } else {
+                statusText.textContent = `${pending} files ready to upload`;
+            }
+        }
+
+        if (startBtn) {
+            startBtn.disabled = isUploading || pending === 0;
+        }
+        if (clearBtn) {
+            clearBtn.disabled = isUploading || total === 0;
+        }
     }
 
     function escapeHtml(str) {
@@ -298,4 +336,6 @@
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         })[c]);
     }
+
+    updateUI();
 })();

@@ -21,7 +21,7 @@ function cleanOrphans() {
 }
 
 function deleteFolder(id) {
-    if (!confirm('Delete this folder? Photos will be moved to root.')) return;
+    if (!confirm('Delete this folder? All photos within will also be deleted.')) return;
     fetch('/admin/folders/' + id, { method: 'DELETE' })
         .then(r => {
             if (r.ok) location.reload();

@@ -22,10 +22,10 @@ type ThumbnailService struct {
 }
 
 func NewThumbnailService(mediaRoot, cacheDir string) *ThumbnailService {
-	os.MkdirAll(filepath.Join(cacheDir, "small"), 0755)
-	os.MkdirAll(filepath.Join(cacheDir, "medium"), 0755)
-	os.MkdirAll(filepath.Join(cacheDir, "large"), 0755)
-	os.MkdirAll(filepath.Join(cacheDir, "placeholder"), 0755)
+	_ = os.MkdirAll(filepath.Join(cacheDir, "small"), 0755)
+	_ = os.MkdirAll(filepath.Join(cacheDir, "medium"), 0755)
+	_ = os.MkdirAll(filepath.Join(cacheDir, "large"), 0755)
+	_ = os.MkdirAll(filepath.Join(cacheDir, "placeholder"), 0755)
 	return &ThumbnailService{
 		mediaRoot: mediaRoot,
 		cacheDir:  cacheDir,
@@ -115,7 +115,7 @@ func (s *ThumbnailService) GetImageDimensions(photoPath string) (int, int, error
 	if err != nil {
 		return 0, 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	config, _, err := image.DecodeConfig(f)
 	if err != nil {
@@ -170,7 +170,7 @@ func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string) 
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if err := png.Encode(f, img); err != nil {
 		return "", err
@@ -184,7 +184,7 @@ func (s *ThumbnailService) DeleteThumbnailsByID(photoID int) error {
 	for _, size := range []string{"small", "medium", "large", "placeholder"} {
 		for _, ext := range []string{".jpg", ".png"} {
 			path := filepath.Join(s.cacheDir, size, fmt.Sprintf("%d%s", photoID, ext))
-			os.Remove(path)
+			_ = os.Remove(path)
 			s.existsCache.Delete(path)
 		}
 	}

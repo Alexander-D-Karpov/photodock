@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/public.css">
 </head>
 <body class="index-page">
 <div class="index-container">
@@ -70,7 +70,7 @@
             </tr>
             {{end}}
             {{range .Photos}}
-            <tr class="photo-row" data-name="{{.Filename}}" data-size="{{.SizeBytes}}" data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}" data-id="{{.ID}}" data-width="{{.Width}}" data-height="{{.Height}}">
+            <tr class="photo-row" data-name="{{.Filename}}" data-size="{{.SizeBytes}}" data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
                 <td class="col-icon">
                     <img src="/thumb/small/{{.ID}}" alt="" class="list-thumb" loading="lazy">
                 </td>
@@ -93,9 +93,9 @@
                     {{range .Subfolders}}
                     <a href="/p/{{urlpath .Path}}/" class="folder-card" data-name="{{.Name}}" data-date="{{.CreatedAt.Unix}}">
                         <div class="folder-cover {{if not .PreviewURLs}}empty{{else if eq (len .PreviewURLs) 1}}count-1{{else if eq (len .PreviewURLs) 2}}count-2{{else if eq (len .PreviewURLs) 3}}count-3{{else}}count-4{{end}}">
-                        {{if .PreviewURLs}}
+                            {{if .PreviewURLs}}
                             {{range .PreviewURLs}}
-                            <img src="{{.}}" alt="" loading="lazy">
+                            <img class="lazy" data-src="{{.}}" alt="" loading="lazy">
                             {{end}}
                             {{else}}
                             {{template "icon-folder"}}
@@ -114,7 +114,7 @@
             {{if .Photos}}
             <div class="grid-section">
                 <h2>Photos</h2>
-                <div class="masonry" id="gallery">
+                <div class="masonry" id="gallery" data-total="{{len .Photos}}" data-folder="{{.Folder.ID}}">
                     {{range .Photos}}
                     <a href="{{if .URLPath}}/p/{{.URLPath}}{{else}}/photo/{{.ID}}{{end}}" class="photo-item" data-id="{{.ID}}" data-name="{{.Filename}}" data-size="{{.SizeBytes}}" data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
                         <img class="lazy" data-src="/thumb/small/{{.ID}}"
@@ -124,6 +124,7 @@
                     </a>
                     {{end}}
                 </div>
+                <div class="load-more-trigger" id="load-more-trigger"></div>
             </div>
             {{end}}
         </div>

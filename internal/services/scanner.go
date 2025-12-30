@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,9 +62,13 @@ func (s *ScannerService) scanDir(ctx context.Context, relPath string, parentID *
 			if err != nil {
 				continue
 			}
-			s.scanDir(ctx, entryRelPath, &folderID)
+			if err := s.scanDir(ctx, entryRelPath, &folderID); err != nil {
+				log.Printf("scan dir error %s: %v", entryRelPath, err)
+			}
 		} else if isImageFile(entry.Name()) {
-			s.processPhoto(ctx, entryRelPath, parentID)
+			if err := s.processPhoto(ctx, entryRelPath, parentID); err != nil {
+				log.Printf("process photo error %s: %v", entryRelPath, err)
+			}
 		}
 	}
 
@@ -99,6 +104,7 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 	}
 
 	if err := s.exifSvc.StripGPS(absPath); err != nil {
+		log.Printf("strip GPS error %s: %v", relPath, err)
 	}
 
 	exifInfo, takenAt, _ := s.exifSvc.Extract(absPath)
@@ -129,9 +135,9 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 		return err
 	}
 
-	s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "small")
-	s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "medium")
-	s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "large")
+	_, _ = s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "small")
+	_, _ = s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "medium")
+	_, _ = s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "large")
 
 	return nil
 }
@@ -207,7 +213,7 @@ func (s *ScannerService) CleanOrphans(ctx context.Context) error {
 	}
 
 	for _, id := range orphanIDs {
-		s.db.Pool().Exec(ctx, "DELETE FROM photos WHERE id = $1", id)
+		_, _ = s.db.Pool().Exec(ctx, "DELETE FROM photos WHERE id = $1", id)
 	}
 
 	_, err = s.db.Pool().Exec(ctx, `
@@ -236,7 +242,9 @@ func (s *ScannerService) RegenerateURLPaths(ctx context.Context) error {
 	var photos []photoRow
 	for rows.Next() {
 		var p photoRow
-		rows.Scan(&p.id, &p.path)
+		if err := rows.Scan(&p.id, &p.path); err != nil {
+			continue
+		}
 		photos = append(photos, p)
 	}
 	rows.Close()
@@ -248,7 +256,7 @@ func (s *ScannerService) RegenerateURLPaths(ctx context.Context) error {
 
 	for _, p := range photos {
 		urlPath := s.generateURLPath(ctx, p.path)
-		s.db.Pool().Exec(ctx, "UPDATE photos SET url_path = $1 WHERE id = $2", urlPath, p.id)
+		_, _ = s.db.Pool().Exec(ctx, "UPDATE photos SET url_path = $1 WHERE id = $2", urlPath, p.id)
 	}
 
 	return nil

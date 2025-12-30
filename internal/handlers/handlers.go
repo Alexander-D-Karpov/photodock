@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -78,7 +79,7 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 	tmplFS, _ := fs.Sub(webFS, "web/templates")
 	tmpl := template.New("").Funcs(funcMap)
 
-	fs.WalkDir(tmplFS, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(tmplFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".html") {
 			return err
 		}
@@ -86,9 +87,12 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 		if err != nil {
 			return err
 		}
-		tmpl.New(path).Parse(string(content))
-		return nil
+		_, err = tmpl.New(path).Parse(string(content))
+		return err
 	})
+	if err != nil {
+		log.Printf("template walk error: %v", err)
+	}
 
 	return &Handlers{
 		db:       db,
@@ -104,13 +108,11 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 func (x *IntPtrOrString) UnmarshalJSON(b []byte) error {
 	s := strings.TrimSpace(string(b))
 
-	// null
 	if s == "null" {
 		x.V = nil
 		return nil
 	}
 
-	// "123" / "" / "null"
 	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
 		u, err := strconv.Unquote(s)
 		if err != nil {
@@ -129,7 +131,6 @@ func (x *IntPtrOrString) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 
-	// 123
 	i64, err := strconv.ParseInt(s, 10, 0)
 	if err != nil {
 		return err
@@ -194,14 +195,24 @@ func (h *Handlers) publicIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	if r.URL.Query().Get("ajax") == "1" {
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		h.jsonPhotosPage(w, r, ctx, nil, page)
+		return
+	}
+
 	folders, _ := h.getRootFolders(ctx)
 	photos, _ := h.getRootPhotos(ctx)
 
 	var photoCount, folderCount int
 	var totalSize int64
-	h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE hidden = false").Scan(&photoCount)
-	h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM folders").Scan(&folderCount)
-	h.db.Pool().QueryRow(ctx, "SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE hidden = false").Scan(&totalSize)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE hidden = false AND folder_id IS NULL").Scan(&photoCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM folders WHERE parent_id IS NULL").Scan(&folderCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE hidden = false").Scan(&totalSize)
 
 	h.render(w, "public/index.html", map[string]interface{}{
 		"Folders":     folders,
@@ -210,6 +221,93 @@ func (h *Handlers) publicIndex(w http.ResponseWriter, r *http.Request) {
 		"PhotoCount":  photoCount,
 		"FolderCount": folderCount,
 		"TotalSize":   totalSize,
+	})
+}
+
+func (h *Handlers) jsonPhotosPage(w http.ResponseWriter, r *http.Request, ctx context.Context, folderID *int, page int) {
+	const perPage = 50
+	offset := (page - 1) * perPage
+
+	var where string
+	var args []interface{}
+
+	if folderID != nil {
+		where = "folder_id = $1 AND hidden = false"
+		args = []interface{}{*folderID, perPage, offset}
+	} else {
+		where = "folder_id IS NULL AND hidden = false"
+		args = []interface{}{perPage, offset}
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, filename, COALESCE(url_path, ''), title, size_bytes, blurhash, 
+		       COALESCE(EXTRACT(EPOCH FROM taken_at), EXTRACT(EPOCH FROM created_at))::bigint as date
+		FROM photos WHERE %s 
+		ORDER BY COALESCE(taken_at, created_at) DESC, id DESC 
+		LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
+
+	if folderID != nil {
+		args = []interface{}{*folderID, perPage, offset}
+	} else {
+		args = []interface{}{perPage, offset}
+	}
+
+	rows, err := h.db.Pool().Query(ctx, query, args...)
+	if err != nil {
+		h.jsonResponse(w, map[string]interface{}{"photos": []interface{}{}, "hasMore": false})
+		return
+	}
+	defer rows.Close()
+
+	type photoJSON struct {
+		ID       int    `json:"id"`
+		Filename string `json:"filename"`
+		URL      string `json:"url"`
+		Title    string `json:"title"`
+		Size     int64  `json:"size"`
+		Blurhash string `json:"blurhash"`
+		Date     int64  `json:"date"`
+	}
+
+	var photos []photoJSON
+	for rows.Next() {
+		var p photoJSON
+		var urlPath string
+		var title sql.NullString
+		var blurhash sql.NullString
+
+		if err := rows.Scan(&p.ID, &p.Filename, &urlPath, &title, &p.Size, &blurhash, &p.Date); err != nil {
+			continue
+		}
+
+		if urlPath != "" {
+			p.URL = "/p/" + urlPath
+		} else {
+			p.URL = fmt.Sprintf("/photo/%d", p.ID)
+		}
+		if title.Valid {
+			p.Title = title.String
+		}
+		if blurhash.Valid {
+			p.Blurhash = blurhash.String
+		}
+		photos = append(photos, p)
+	}
+
+	var totalCount int
+	if folderID != nil {
+		_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE folder_id = $1 AND hidden = false", *folderID).Scan(&totalCount)
+	} else {
+		_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE folder_id IS NULL AND hidden = false").Scan(&totalCount)
+	}
+
+	hasMore := page*perPage < totalCount
+
+	h.jsonResponse(w, map[string]interface{}{
+		"photos":  photos,
+		"hasMore": hasMore,
+		"page":    page,
+		"total":   totalCount,
 	})
 }
 
@@ -298,22 +396,6 @@ func (h *Handlers) renderFolder(w http.ResponseWriter, r *http.Request, folder *
 	})
 }
 
-func (h *Handlers) publicPhotoByPath(w http.ResponseWriter, r *http.Request) {
-	urlPath := r.PathValue("path")
-	if urlPath == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	photo, err := h.getPhotoByURLPath(r.Context(), urlPath)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	h.renderPhoto(w, r, photo)
-}
-
 func (h *Handlers) publicPhotoByID(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
 
@@ -336,7 +418,7 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 
 	var exifInfo models.ExifInfo
 	if photo.ExifData != nil {
-		json.Unmarshal(photo.ExifData, &exifInfo)
+		_ = json.Unmarshal(photo.ExifData, &exifInfo)
 	}
 
 	prevURL, nextURL, prevID, nextID := h.getAdjacentPhotoInfo(ctx, photo)
@@ -461,12 +543,12 @@ func (h *Handlers) adminDeletePhoto(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var path string
-	h.db.Pool().QueryRow(ctx, "SELECT path FROM photos WHERE id = $1", id).Scan(&path)
-	h.db.Pool().Exec(ctx, "DELETE FROM photos WHERE id = $1", id)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT path FROM photos WHERE id = $1", id).Scan(&path)
+	_, _ = h.db.Pool().Exec(ctx, "DELETE FROM photos WHERE id = $1", id)
 
 	if path != "" {
-		h.thumbSvc.DeleteThumbnailsByID(id)
-		os.Remove(filepath.Join(h.cfg.MediaRoot, path))
+		_ = h.thumbSvc.DeleteThumbnailsByID(id)
+		_ = os.Remove(filepath.Join(h.cfg.MediaRoot, path))
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -501,10 +583,10 @@ func (h *Handlers) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	var photoCount, folderCount, hiddenCount int
 	var totalSize int64
 
-	h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos").Scan(&photoCount)
-	h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM folders").Scan(&folderCount)
-	h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE hidden = true").Scan(&hiddenCount)
-	h.db.Pool().QueryRow(ctx, "SELECT COALESCE(SUM(size_bytes), 0) FROM photos").Scan(&totalSize)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos").Scan(&photoCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM folders").Scan(&folderCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE hidden = true").Scan(&hiddenCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COALESCE(SUM(size_bytes), 0) FROM photos").Scan(&totalSize)
 
 	folders, _ := h.getAllFolders(ctx)
 
@@ -545,7 +627,7 @@ func (h *Handlers) adminCreateFolder(w http.ResponseWriter, r *http.Request) {
 	if pidStr := r.FormValue("parent_id"); pidStr != "" {
 		pid, _ := strconv.Atoi(pidStr)
 		parentID = &pid
-		h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", pid).Scan(&parentPath)
+		_ = h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", pid).Scan(&parentPath)
 	}
 
 	path := name
@@ -558,7 +640,7 @@ func (h *Handlers) adminCreateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.db.Pool().Exec(ctx,
+	_, _ = h.db.Pool().Exec(ctx,
 		"INSERT INTO folders (parent_id, name, path) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
 		parentID, name, path)
 
@@ -598,13 +680,13 @@ func (h *Handlers) adminUpdateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.db.Pool().Exec(r.Context(), "UPDATE folders SET name = $1, updated_at = NOW() WHERE id = $2", name, id)
+	_, _ = h.db.Pool().Exec(r.Context(), "UPDATE folders SET name = $1, updated_at = NOW() WHERE id = $2", name, id)
 	http.Redirect(w, r, "/admin/folders", http.StatusSeeOther)
 }
 
 func (h *Handlers) adminDeleteFolder(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
-	h.db.Pool().Exec(r.Context(), "DELETE FROM folders WHERE id = $1", id)
+	_, _ = h.db.Pool().Exec(r.Context(), "DELETE FROM folders WHERE id = $1", id)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -617,7 +699,7 @@ func (h *Handlers) adminSetCover(w http.ResponseWriter, r *http.Request) {
 		photoID = &pid
 	}
 
-	h.db.Pool().Exec(r.Context(),
+	_, _ = h.db.Pool().Exec(r.Context(),
 		"UPDATE folders SET cover_photo_id = $1, updated_at = NOW() WHERE id = $2",
 		photoID, folderID)
 	w.WriteHeader(http.StatusOK)
@@ -665,7 +747,7 @@ func (h *Handlers) adminPhotos(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var totalCount int
-	h.db.Pool().QueryRow(ctx, countQuery, args...).Scan(&totalCount)
+	_ = h.db.Pool().QueryRow(ctx, countQuery, args...).Scan(&totalCount)
 
 	query += fmt.Sprintf(" ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
 	args = append(args, perPage, offset)
@@ -676,7 +758,9 @@ func (h *Handlers) adminPhotos(w http.ResponseWriter, r *http.Request) {
 	var photos []models.Photo
 	for rows.Next() {
 		var p models.Photo
-		rows.Scan(&p.ID, &p.FolderID, &p.Filename, &p.Path, &p.Title, &p.Hidden, &p.Width, &p.Height)
+		if err := rows.Scan(&p.ID, &p.FolderID, &p.Filename, &p.Path, &p.Title, &p.Hidden, &p.Width, &p.Height); err != nil {
+			continue
+		}
 		photos = append(photos, p)
 	}
 
@@ -715,7 +799,7 @@ func (h *Handlers) adminEditPhoto(w http.ResponseWriter, r *http.Request) {
 
 	var exifInfo models.ExifInfo
 	if photo.ExifData != nil {
-		json.Unmarshal(photo.ExifData, &exifInfo)
+		_ = json.Unmarshal(photo.ExifData, &exifInfo)
 	}
 
 	folders, _ := h.getAllFolders(ctx)
@@ -737,7 +821,7 @@ func (h *Handlers) adminUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 		folderID = &fid
 	}
 
-	h.db.Pool().Exec(r.Context(),
+	_, _ = h.db.Pool().Exec(r.Context(),
 		`UPDATE photos SET title = NULLIF($1, ''), description = NULLIF($2, ''), 
 		note = NULLIF($3, ''), folder_id = $4, updated_at = NOW() WHERE id = $5`,
 		r.FormValue("title"), r.FormValue("description"), r.FormValue("note"), folderID, id)
@@ -747,7 +831,7 @@ func (h *Handlers) adminUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) adminToggleHide(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
-	h.db.Pool().Exec(r.Context(), "UPDATE photos SET hidden = NOT hidden, updated_at = NOW() WHERE id = $1", id)
+	_, _ = h.db.Pool().Exec(r.Context(), "UPDATE photos SET hidden = NOT hidden, updated_at = NOW() WHERE id = $1", id)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -755,19 +839,21 @@ func (h *Handlers) adminMovePhoto(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
 
 	var folderID *int
-	if fidStr := r.FormValue("folder_id"); fidStr != "" && fidStr != "" {
+	if fidStr := r.FormValue("folder_id"); fidStr != "" {
 		fid, _ := strconv.Atoi(fidStr)
 		if fid > 0 {
 			folderID = &fid
 		}
 	}
 
-	h.db.Pool().Exec(r.Context(), "UPDATE photos SET folder_id = $1, updated_at = NOW() WHERE id = $2", folderID, id)
+	_, _ = h.db.Pool().Exec(r.Context(), "UPDATE photos SET folder_id = $1, updated_at = NOW() WHERE id = $2", folderID, id)
 	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handlers) adminScan(w http.ResponseWriter, r *http.Request) {
-	go h.scanSvc.ScanAll(context.Background())
+	go func() {
+		_ = h.scanSvc.ScanAll(context.Background())
+	}()
 	h.jsonResponse(w, map[string]string{"status": "started"})
 }
 
@@ -780,17 +866,23 @@ func (h *Handlers) adminScanFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.scanSvc.ScanFolder(context.Background(), path)
+	go func() {
+		_ = h.scanSvc.ScanFolder(context.Background(), path)
+	}()
 	h.jsonResponse(w, map[string]string{"status": "started"})
 }
 
 func (h *Handlers) adminClean(w http.ResponseWriter, r *http.Request) {
-	go h.scanSvc.CleanOrphans(context.Background())
+	go func() {
+		_ = h.scanSvc.CleanOrphans(context.Background())
+	}()
 	h.jsonResponse(w, map[string]string{"status": "started"})
 }
 
 func (h *Handlers) adminRegenerateURLs(w http.ResponseWriter, r *http.Request) {
-	go h.scanSvc.RegenerateURLPaths(context.Background())
+	go func() {
+		_ = h.scanSvc.RegenerateURLPaths(context.Background())
+	}()
 	h.jsonResponse(w, map[string]string{"status": "started"})
 }
 
@@ -804,7 +896,7 @@ func (h *Handlers) adminUpload(w http.ResponseWriter, r *http.Request) {
 	var folderPath string
 	if fidStr := r.FormValue("folder_id"); fidStr != "" && fidStr != "null" {
 		fid, _ := strconv.Atoi(fidStr)
-		h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", fid).Scan(&folderPath)
+		_ = h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", fid).Scan(&folderPath)
 	}
 
 	for _, fh := range r.MultipartForm.File["files"] {
@@ -820,7 +912,6 @@ func (h *Handlers) adminUpload(w http.ResponseWriter, r *http.Request) {
 
 		absPath := h.resolveConflict(filepath.Join(h.cfg.MediaRoot, relPath))
 
-		// Ensure destination directory exists
 		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 			continue
 		}
@@ -832,16 +923,18 @@ func (h *Handlers) adminUpload(w http.ResponseWriter, r *http.Request) {
 
 		dst, err := os.Create(absPath)
 		if err != nil {
-			file.Close()
+			_ = file.Close()
 			continue
 		}
 
 		_, _ = io.Copy(dst, file)
-		dst.Close()
-		file.Close()
+		_ = dst.Close()
+		_ = file.Close()
 	}
 
-	go h.scanSvc.ScanFolder(context.Background(), folderPath)
+	go func() {
+		_ = h.scanSvc.ScanFolder(context.Background(), folderPath)
+	}()
 	http.Redirect(w, r, "/admin/photos", http.StatusSeeOther)
 }
 
@@ -856,7 +949,7 @@ func (h *Handlers) adminUploadFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if !isImageFile(header.Filename) {
 		http.Error(w, "Invalid file type", 400)
@@ -867,7 +960,7 @@ func (h *Handlers) adminUploadFile(w http.ResponseWriter, r *http.Request) {
 	var folderPath string
 	if fidStr := r.FormValue("folder_id"); fidStr != "" {
 		fid, _ := strconv.Atoi(fidStr)
-		h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", fid).Scan(&folderPath)
+		_ = h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", fid).Scan(&folderPath)
 	}
 
 	filename := sanitizeFilename(header.Filename)
@@ -878,7 +971,6 @@ func (h *Handlers) adminUploadFile(w http.ResponseWriter, r *http.Request) {
 
 	absPath := h.resolveConflict(filepath.Join(h.cfg.MediaRoot, relPath))
 
-	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -889,14 +981,16 @@ func (h *Handlers) adminUploadFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, file); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 
-	go h.scanSvc.ScanFolder(context.Background(), folderPath)
+	go func() {
+		_ = h.scanSvc.ScanFolder(context.Background(), folderPath)
+	}()
 	h.jsonResponse(w, map[string]string{"status": "ok"})
 }
 
@@ -922,12 +1016,12 @@ func (h *Handlers) adminUploadFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer os.RemoveAll(upload.TempDir)
+	defer func() { _ = os.RemoveAll(upload.TempDir) }()
 
 	ctx := r.Context()
 	var folderPath string
 	if upload.FolderID != nil {
-		h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", *upload.FolderID).Scan(&folderPath)
+		_ = h.db.Pool().QueryRow(ctx, "SELECT path FROM folders WHERE id = $1", *upload.FolderID).Scan(&folderPath)
 	}
 
 	relPath := upload.Filename
@@ -937,7 +1031,6 @@ func (h *Handlers) adminUploadFinalize(w http.ResponseWriter, r *http.Request) {
 
 	absPath := h.resolveConflict(filepath.Join(h.cfg.MediaRoot, relPath))
 
-	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -948,7 +1041,7 @@ func (h *Handlers) adminUploadFinalize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	for i := 0; i < len(upload.Chunks); i++ {
 		chunk, err := os.Open(filepath.Join(upload.TempDir, fmt.Sprintf("chunk_%d", i)))
@@ -957,10 +1050,12 @@ func (h *Handlers) adminUploadFinalize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = io.Copy(dst, chunk)
-		chunk.Close()
+		_ = chunk.Close()
 	}
 
-	go h.scanSvc.ScanFolder(context.Background(), folderPath)
+	go func() {
+		_ = h.scanSvc.ScanFolder(context.Background(), folderPath)
+	}()
 	h.jsonResponse(w, map[string]string{"status": "ok"})
 }
 
@@ -1027,7 +1122,7 @@ func (h *Handlers) adminUploadChunk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	chunkPath := filepath.Join(upload.TempDir, fmt.Sprintf("chunk_%d", chunkIndex))
 	dst, err := os.Create(chunkPath)
@@ -1035,7 +1130,7 @@ func (h *Handlers) adminUploadChunk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, file); err != nil {
 		http.Error(w, err.Error(), 500)
@@ -1058,7 +1153,7 @@ func (h *Handlers) render(w http.ResponseWriter, name string, data map[string]in
 
 func (h *Handlers) jsonResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func (h *Handlers) getPhotoByID(ctx context.Context, id int) (*models.Photo, error) {
@@ -1099,28 +1194,28 @@ func (h *Handlers) getAdjacentPhotoInfo(ctx context.Context, photo *models.Photo
 	}
 
 	if photo.FolderID.Valid {
-		h.db.Pool().QueryRow(ctx,
+		_ = h.db.Pool().QueryRow(ctx,
 			`SELECT id, COALESCE(url_path, '') FROM photos 
 			WHERE folder_id = $1 AND hidden = false 
 			AND (COALESCE(taken_at, created_at) > $2 OR (COALESCE(taken_at, created_at) = $2 AND id > $3))
 			ORDER BY COALESCE(taken_at, created_at) ASC, id ASC LIMIT 1`,
 			photo.FolderID.Int64, sortTime, photo.ID).Scan(&prev.ID, &prev.URLPath)
 
-		h.db.Pool().QueryRow(ctx,
+		_ = h.db.Pool().QueryRow(ctx,
 			`SELECT id, COALESCE(url_path, '') FROM photos 
 			WHERE folder_id = $1 AND hidden = false 
 			AND (COALESCE(taken_at, created_at) < $2 OR (COALESCE(taken_at, created_at) = $2 AND id < $3))
 			ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT 1`,
 			photo.FolderID.Int64, sortTime, photo.ID).Scan(&next.ID, &next.URLPath)
 	} else {
-		h.db.Pool().QueryRow(ctx,
+		_ = h.db.Pool().QueryRow(ctx,
 			`SELECT id, COALESCE(url_path, '') FROM photos 
 			WHERE folder_id IS NULL AND hidden = false 
 			AND (COALESCE(taken_at, created_at) > $1 OR (COALESCE(taken_at, created_at) = $1 AND id > $2))
 			ORDER BY COALESCE(taken_at, created_at) ASC, id ASC LIMIT 1`,
 			sortTime, photo.ID).Scan(&prev.ID, &prev.URLPath)
 
-		h.db.Pool().QueryRow(ctx,
+		_ = h.db.Pool().QueryRow(ctx,
 			`SELECT id, COALESCE(url_path, '') FROM photos 
 			WHERE folder_id IS NULL AND hidden = false 
 			AND (COALESCE(taken_at, created_at) < $1 OR (COALESCE(taken_at, created_at) = $1 AND id < $2))
@@ -1148,11 +1243,11 @@ func (h *Handlers) getAdjacentPhotoInfo(ctx context.Context, photo *models.Photo
 }
 
 func (h *Handlers) getPhotoPosition(ctx context.Context, photo *models.Photo) (position, total int) {
-	h.db.Pool().QueryRow(ctx,
+	_ = h.db.Pool().QueryRow(ctx,
 		`SELECT COUNT(*) FROM photos WHERE folder_id IS NOT DISTINCT FROM $1 AND hidden = false`,
 		photo.FolderID).Scan(&total)
 
-	h.db.Pool().QueryRow(ctx,
+	_ = h.db.Pool().QueryRow(ctx,
 		`SELECT COUNT(*) + 1 FROM photos 
 		WHERE folder_id IS NOT DISTINCT FROM $1 AND hidden = false 
 		AND (COALESCE(taken_at, created_at), id) > (COALESCE($2, $3), $4)`,
@@ -1204,8 +1299,10 @@ func (h *Handlers) getFoldersWithCounts(ctx context.Context, where string) ([]mo
 	for rows.Next() {
 		var f models.Folder
 		var previewIDs []int64
-		rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path, &f.CoverPhotoID, &f.CreatedAt,
-			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &previewIDs)
+		if err := rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path, &f.CoverPhotoID, &f.CreatedAt,
+			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &previewIDs); err != nil {
+			continue
+		}
 
 		for _, pid := range previewIDs {
 			f.PreviewURLs = append(f.PreviewURLs, fmt.Sprintf("/thumb/small/%d", pid))
@@ -1240,7 +1337,9 @@ func (h *Handlers) getPhotos(ctx context.Context, where string) ([]models.Photo,
 	var photos []models.Photo
 	for rows.Next() {
 		var p models.Photo
-		rows.Scan(&p.ID, &p.FolderID, &p.Filename, &p.Path, &p.URLPath, &p.Title, &p.Width, &p.Height, &p.Blurhash, &p.SizeBytes, &p.TakenAt, &p.CreatedAt)
+		if err := rows.Scan(&p.ID, &p.FolderID, &p.Filename, &p.Path, &p.URLPath, &p.Title, &p.Width, &p.Height, &p.Blurhash, &p.SizeBytes, &p.TakenAt, &p.CreatedAt); err != nil {
+			continue
+		}
 		photos = append(photos, p)
 	}
 	return photos, nil
@@ -1256,7 +1355,9 @@ func (h *Handlers) getAllFolders(ctx context.Context) ([]models.Folder, error) {
 	var folders []models.Folder
 	for rows.Next() {
 		var f models.Folder
-		rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path)
+		if err := rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path); err != nil {
+			continue
+		}
 		folders = append(folders, f)
 	}
 	return folders, nil
@@ -1289,8 +1390,10 @@ func (h *Handlers) getFolderTree(ctx context.Context) ([]models.Folder, error) {
 	for rows.Next() {
 		var f models.Folder
 		var firstPhotoID sql.NullInt64
-		rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path, &f.CoverPhotoID, &f.CreatedAt, &f.Depth,
-			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &firstPhotoID)
+		if err := rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path, &f.CoverPhotoID, &f.CreatedAt, &f.Depth,
+			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &firstPhotoID); err != nil {
+			continue
+		}
 		if firstPhotoID.Valid {
 			f.CoverURL = fmt.Sprintf("/thumb/small/%d", firstPhotoID.Int64)
 		}
@@ -1374,7 +1477,7 @@ func sanitizeFilename(name string) string {
 
 func randString(n int) string {
 	b := make([]byte, n)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)[:n]
 }
 
