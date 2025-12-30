@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Alexander-D-Karpov/photodock/internal/database"
 )
@@ -168,28 +169,38 @@ func (s *ScannerService) generateURLPath(ctx context.Context, filePath string) s
 func sanitizeURLPath(path string) string {
 	path = strings.ToLower(path)
 
-	path = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '/' || r == '.' || r == '-' || r == '_' {
-			return r
+	var result strings.Builder
+	prevDash := false
+
+	for _, r := range path {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			result.WriteRune(r)
+			prevDash = false
+		} else if r == '/' || r == '.' || r == '-' || r == '_' {
+			result.WriteRune(r)
+			prevDash = (r == '-')
+		} else if r == ' ' {
+			if !prevDash {
+				result.WriteRune('-')
+				prevDash = true
+			}
 		}
-		if r == ' ' {
-			return '-'
-		}
-		return -1
-	}, path)
+	}
+
+	urlPath := result.String()
 
 	re := regexp.MustCompile(`-+`)
-	path = re.ReplaceAllString(path, "-")
+	urlPath = re.ReplaceAllString(urlPath, "-")
 
-	path = strings.Trim(path, "-")
+	urlPath = strings.Trim(urlPath, "-")
 
-	parts := strings.Split(path, "/")
+	parts := strings.Split(urlPath, "/")
 	for i, part := range parts {
 		parts[i] = strings.Trim(part, "-")
 	}
-	path = strings.Join(parts, "/")
+	urlPath = strings.Join(parts, "/")
 
-	return path
+	return urlPath
 }
 
 func (s *ScannerService) CleanOrphans(ctx context.Context) error {
