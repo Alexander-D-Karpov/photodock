@@ -3,27 +3,45 @@
     let isLoading = false;
     let hasMore = true;
     let observer = null;
+    let imageObserver = null;
+
+    function createSkeletons(container, count) {
+        const types = ['landscape', 'portrait', 'square', 'landscape'];
+        for (let i = 0; i < count; i++) {
+            const skeleton = document.createElement('div');
+            skeleton.className = `photo-item skeleton-item skeleton ${types[i % types.length]}`;
+            skeleton.dataset.skeleton = 'true';
+            container.appendChild(skeleton);
+        }
+    }
+
+    function removeSkeletons(container) {
+        const skeletons = container.querySelectorAll('[data-skeleton="true"]');
+        skeletons.forEach(s => s.remove());
+    }
 
     function initLazyLoading() {
         const lazyImages = document.querySelectorAll('img.lazy:not([data-observed])');
 
-        if ('IntersectionObserver' in window) {
-            const imageObserver = new IntersectionObserver((entries, obs) => {
+        if (!imageObserver && 'IntersectionObserver' in window) {
+            imageObserver = new IntersectionObserver((entries, obs) => {
                 entries.forEach(entry => {
                     if (entry.isIntersecting) {
                         loadImage(entry.target);
                         obs.unobserve(entry.target);
                     }
                 });
-            }, { rootMargin: '200px 0px', threshold: 0.01 });
-
-            lazyImages.forEach(img => {
-                img.dataset.observed = 'true';
-                imageObserver.observe(img);
-            });
-        } else {
-            lazyImages.forEach(img => loadImage(img));
+            }, { rootMargin: '300px 0px', threshold: 0.01 });
         }
+
+        lazyImages.forEach(img => {
+            img.dataset.observed = 'true';
+            if (imageObserver) {
+                imageObserver.observe(img);
+            } else {
+                loadImage(img);
+            }
+        });
     }
 
     function loadImage(img) {
@@ -41,10 +59,23 @@
             img.src = src;
             img.classList.remove('loading', 'lazy');
             img.classList.add('loaded');
+
+            const parent = img.closest('.photo-item');
+            if (parent) {
+                parent.classList.remove('skeleton-item', 'skeleton');
+                if (fullImg.naturalWidth && fullImg.naturalHeight) {
+                    const ratio = fullImg.naturalWidth / fullImg.naturalHeight;
+                    parent.dataset.aspect = ratio.toFixed(2);
+                }
+            }
         };
         fullImg.onerror = () => {
             img.classList.remove('loading', 'lazy');
             img.classList.add('loaded');
+            const parent = img.closest('.photo-item');
+            if (parent) {
+                parent.classList.remove('skeleton-item', 'skeleton');
+            }
         };
         fullImg.src = src;
     }
@@ -97,7 +128,7 @@
         if (!gallery || !trigger) return;
 
         const totalPhotos = parseInt(gallery.dataset.total || '0');
-        const loadedPhotos = gallery.querySelectorAll('.photo-item').length;
+        const loadedPhotos = gallery.querySelectorAll('.photo-item:not([data-skeleton])').length;
         hasMore = loadedPhotos < totalPhotos;
 
         if (!hasMore) {
@@ -109,7 +140,7 @@
             if (entries[0].isIntersecting && !isLoading && hasMore) {
                 loadMorePhotos();
             }
-        }, { rootMargin: '200px' });
+        }, { rootMargin: '400px' });
 
         observer.observe(trigger);
     }
@@ -118,10 +149,14 @@
         if (isLoading || !hasMore) return;
 
         isLoading = true;
+        const gallery = document.getElementById('gallery');
         const trigger = document.getElementById('load-more-trigger');
+
         if (trigger) {
             trigger.innerHTML = '<div class="load-more-spinner"></div>';
         }
+
+        createSkeletons(gallery, 6);
 
         currentPage++;
         const url = new URL(window.location);
@@ -131,6 +166,8 @@
         try {
             const res = await fetch(url);
             const data = await res.json();
+
+            removeSkeletons(gallery);
 
             if (data.photos && data.photos.length > 0) {
                 appendPhotos(data.photos);
@@ -147,6 +184,7 @@
             }
         } catch (err) {
             console.error('Failed to load more photos:', err);
+            removeSkeletons(gallery);
             if (trigger) {
                 trigger.innerHTML = '<span class="load-more-end">Failed to load</span>';
             }
@@ -184,16 +222,27 @@
         initLazyLoading();
     }
 
+    function init() {
+        const gallery = document.getElementById('gallery');
+        if (gallery) {
+            const existingItems = gallery.querySelectorAll('.photo-item');
+            existingItems.forEach(item => {
+                const img = item.querySelector('img.lazy');
+                if (img && !img.classList.contains('loaded')) {
+                    item.classList.add('skeleton-item', 'skeleton');
+                }
+            });
+        }
+
+        initLazyLoading();
+        initFolderLazyLoading();
+        initInfiniteScroll();
+    }
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
         init();
-    }
-
-    function init() {
-        initLazyLoading();
-        initFolderLazyLoading();
-        initInfiniteScroll();
     }
 
     window.initGalleryLazyLoading = initLazyLoading;

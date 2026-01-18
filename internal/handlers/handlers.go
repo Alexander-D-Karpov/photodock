@@ -74,6 +74,12 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 			}
 			return result
 		},
+		"divf": func(a, b int) float64 {
+			if b == 0 {
+				return 1.0
+			}
+			return float64(a) / float64(b)
+		},
 	}
 
 	tmplFS, _ := fs.Sub(webFS, "web/templates")
@@ -174,6 +180,11 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/upload/init", h.adminAuth(h.adminUploadInit))
 	mux.HandleFunc("POST /admin/upload/chunk", h.adminAuth(h.adminUploadChunk))
 	mux.HandleFunc("POST /admin/upload/finalize", h.adminAuth(h.adminUploadFinalize))
+
+	mux.HandleFunc("GET /api/folders", h.apiListFolders)
+	mux.HandleFunc("GET /api/folders/{id}", h.apiGetFolder)
+	mux.HandleFunc("GET /api/photos", h.apiListPhotos)
+	mux.HandleFunc("GET /api/photos/{id}", h.apiGetPhoto)
 }
 
 func (h *Handlers) adminAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -210,7 +221,7 @@ func (h *Handlers) publicIndex(w http.ResponseWriter, r *http.Request) {
 
 	var photoCount, folderCount int
 	var totalSize int64
-	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE hidden = false AND folder_id IS NULL").Scan(&photoCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE hidden = false").Scan(&photoCount)
 	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM folders WHERE parent_id IS NULL").Scan(&folderCount)
 	_ = h.db.Pool().QueryRow(ctx, "SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE hidden = false").Scan(&totalSize)
 
@@ -1484,4 +1495,353 @@ func randString(n int) string {
 func isImageFile(name string) bool {
 	ext := strings.ToLower(filepath.Ext(name))
 	return ext == ".jpg" || ext == ".jpeg" || ext == ".png"
+}
+
+func (h *Handlers) apiListFolders(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	parentIDStr := r.URL.Query().Get("parent_id")
+
+	var where string
+	var args []interface{}
+
+	if parentIDStr == "" {
+		where = "parent_id IS NULL"
+	} else if parentIDStr == "root" {
+		where = "parent_id IS NULL"
+	} else {
+		pid, err := strconv.Atoi(parentIDStr)
+		if err != nil {
+			http.Error(w, "invalid parent_id", 400)
+			return
+		}
+		where = "parent_id = $1"
+		args = append(args, pid)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT f.id, f.parent_id, f.name, f.path, f.cover_photo_id, f.created_at,
+			(SELECT COUNT(*) FROM photos WHERE folder_id = f.id AND hidden = false) as photo_count,
+			(SELECT COUNT(*) FROM folders WHERE parent_id = f.id) as subfolder_count,
+			(SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE folder_id = f.id AND hidden = false) as total_size
+		FROM folders f WHERE %s ORDER BY f.name`, where)
+
+	rows, err := h.db.Pool().Query(ctx, query, args...)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+
+	type folderJSON struct {
+		ID             int    `json:"id"`
+		ParentID       *int   `json:"parent_id"`
+		Name           string `json:"name"`
+		Path           string `json:"path"`
+		CoverPhotoID   *int   `json:"cover_photo_id"`
+		CreatedAt      string `json:"created_at"`
+		PhotoCount     int    `json:"photo_count"`
+		SubfolderCount int    `json:"subfolder_count"`
+		TotalSize      int64  `json:"total_size"`
+	}
+
+	var folders []folderJSON
+	for rows.Next() {
+		var f folderJSON
+		var parentID sql.NullInt64
+		var coverPhotoID sql.NullInt64
+		var createdAt time.Time
+
+		if err := rows.Scan(&f.ID, &parentID, &f.Name, &f.Path, &coverPhotoID, &createdAt,
+			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize); err != nil {
+			continue
+		}
+
+		if parentID.Valid {
+			pid := int(parentID.Int64)
+			f.ParentID = &pid
+		}
+		if coverPhotoID.Valid {
+			cid := int(coverPhotoID.Int64)
+			f.CoverPhotoID = &cid
+		}
+		f.CreatedAt = createdAt.Format(time.RFC3339)
+		folders = append(folders, f)
+	}
+
+	if folders == nil {
+		folders = []folderJSON{}
+	}
+
+	h.jsonResponse(w, map[string]interface{}{
+		"folders": folders,
+	})
+}
+
+func (h *Handlers) apiGetFolder(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id", 400)
+		return
+	}
+
+	ctx := r.Context()
+
+	var parentID sql.NullInt64
+	var coverPhotoID sql.NullInt64
+	var name, path string
+	var createdAt time.Time
+	var photoCount, subfolderCount int
+	var totalSize int64
+
+	err = h.db.Pool().QueryRow(ctx, `
+		SELECT f.id, f.parent_id, f.name, f.path, f.cover_photo_id, f.created_at,
+			(SELECT COUNT(*) FROM photos WHERE folder_id = f.id AND hidden = false),
+			(SELECT COUNT(*) FROM folders WHERE parent_id = f.id),
+			(SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE folder_id = f.id AND hidden = false)
+		FROM folders f WHERE f.id = $1`, id).
+		Scan(&id, &parentID, &name, &path, &coverPhotoID, &createdAt,
+			&photoCount, &subfolderCount, &totalSize)
+
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	folder := map[string]interface{}{
+		"id":              id,
+		"parent_id":       nil,
+		"name":            name,
+		"path":            path,
+		"cover_photo_id":  nil,
+		"created_at":      createdAt.Format(time.RFC3339),
+		"photo_count":     photoCount,
+		"subfolder_count": subfolderCount,
+		"total_size":      totalSize,
+	}
+
+	if parentID.Valid {
+		folder["parent_id"] = int(parentID.Int64)
+	}
+	if coverPhotoID.Valid {
+		folder["cover_photo_id"] = int(coverPhotoID.Int64)
+	}
+
+	h.jsonResponse(w, folder)
+}
+
+func (h *Handlers) apiListPhotos(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if perPage < 1 || perPage > 100 {
+		perPage = 50
+	}
+
+	offset := (page - 1) * perPage
+	folderFilter := r.URL.Query().Get("folder_id")
+
+	query := `SELECT id, folder_id, filename, path, COALESCE(url_path, ''), title, description,
+		width, height, size_bytes, blurhash, hidden, created_at, taken_at
+		FROM photos WHERE hidden = false`
+	countQuery := "SELECT COUNT(*) FROM photos WHERE hidden = false"
+
+	var args []interface{}
+	argIdx := 1
+
+	if folderFilter == "root" {
+		query += " AND folder_id IS NULL"
+		countQuery += " AND folder_id IS NULL"
+	} else if folderFilter != "" {
+		fid, err := strconv.Atoi(folderFilter)
+		if err != nil {
+			http.Error(w, "invalid folder_id", 400)
+			return
+		}
+		query += fmt.Sprintf(" AND folder_id = $%d", argIdx)
+		countQuery += fmt.Sprintf(" AND folder_id = $%d", argIdx)
+		args = append(args, fid)
+		argIdx++
+	}
+
+	var totalCount int
+	_ = h.db.Pool().QueryRow(ctx, countQuery, args...).Scan(&totalCount)
+
+	query += fmt.Sprintf(" ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, perPage, offset)
+
+	rows, err := h.db.Pool().Query(ctx, query, args...)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+
+	type photoJSON struct {
+		ID          int     `json:"id"`
+		FolderID    *int    `json:"folder_id"`
+		Filename    string  `json:"filename"`
+		Path        string  `json:"path"`
+		URL         string  `json:"url"`
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
+		Width       int     `json:"width"`
+		Height      int     `json:"height"`
+		SizeBytes   int64   `json:"size_bytes"`
+		Blurhash    *string `json:"blurhash"`
+		CreatedAt   string  `json:"created_at"`
+		TakenAt     *string `json:"taken_at"`
+		Thumbnails  struct {
+			Small  string `json:"small"`
+			Medium string `json:"medium"`
+			Large  string `json:"large"`
+		} `json:"thumbnails"`
+	}
+
+	var photos []photoJSON
+	for rows.Next() {
+		var p photoJSON
+		var folderID sql.NullInt64
+		var urlPath string
+		var title, description, blurhash sql.NullString
+		var createdAt time.Time
+		var takenAt sql.NullTime
+		var hidden bool
+
+		if err := rows.Scan(&p.ID, &folderID, &p.Filename, &p.Path, &urlPath, &title, &description,
+			&p.Width, &p.Height, &p.SizeBytes, &blurhash, &hidden, &createdAt, &takenAt); err != nil {
+			continue
+		}
+
+		if folderID.Valid {
+			fid := int(folderID.Int64)
+			p.FolderID = &fid
+		}
+		if urlPath != "" {
+			p.URL = "/p/" + urlPath
+		} else {
+			p.URL = fmt.Sprintf("/photo/%d", p.ID)
+		}
+		if title.Valid {
+			p.Title = &title.String
+		}
+		if description.Valid {
+			p.Description = &description.String
+		}
+		if blurhash.Valid {
+			p.Blurhash = &blurhash.String
+		}
+		p.CreatedAt = createdAt.Format(time.RFC3339)
+		if takenAt.Valid {
+			t := takenAt.Time.Format(time.RFC3339)
+			p.TakenAt = &t
+		}
+		p.Thumbnails.Small = fmt.Sprintf("/thumb/small/%d", p.ID)
+		p.Thumbnails.Medium = fmt.Sprintf("/thumb/medium/%d", p.ID)
+		p.Thumbnails.Large = fmt.Sprintf("/thumb/large/%d", p.ID)
+
+		photos = append(photos, p)
+	}
+
+	if photos == nil {
+		photos = []photoJSON{}
+	}
+
+	h.jsonResponse(w, map[string]interface{}{
+		"photos":   photos,
+		"page":     page,
+		"per_page": perPage,
+		"total":    totalCount,
+		"pages":    (totalCount + perPage - 1) / perPage,
+	})
+}
+
+func (h *Handlers) apiGetPhoto(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id", 400)
+		return
+	}
+
+	ctx := r.Context()
+
+	var folderID sql.NullInt64
+	var filename, path, urlPath string
+	var title, description, note, blurhash sql.NullString
+	var width, height int
+	var sizeBytes int64
+	var exifData json.RawMessage
+	var hidden bool
+	var createdAt time.Time
+	var takenAt sql.NullTime
+
+	err = h.db.Pool().QueryRow(ctx, `
+		SELECT id, folder_id, filename, path, COALESCE(url_path, ''), title, description, note,
+			width, height, size_bytes, blurhash, exif_data, hidden, created_at, taken_at
+		FROM photos WHERE id = $1 AND hidden = false`, id).
+		Scan(&id, &folderID, &filename, &path, &urlPath, &title, &description, &note,
+			&width, &height, &sizeBytes, &blurhash, &exifData, &hidden, &createdAt, &takenAt)
+
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	photo := map[string]interface{}{
+		"id":          id,
+		"folder_id":   nil,
+		"filename":    filename,
+		"path":        path,
+		"url":         fmt.Sprintf("/photo/%d", id),
+		"title":       nil,
+		"description": nil,
+		"note":        nil,
+		"width":       width,
+		"height":      height,
+		"size_bytes":  sizeBytes,
+		"blurhash":    nil,
+		"created_at":  createdAt.Format(time.RFC3339),
+		"taken_at":    nil,
+		"thumbnails": map[string]string{
+			"small":  fmt.Sprintf("/thumb/small/%d", id),
+			"medium": fmt.Sprintf("/thumb/medium/%d", id),
+			"large":  fmt.Sprintf("/thumb/large/%d", id),
+		},
+		"original": fmt.Sprintf("/original/%d", id),
+	}
+
+	if folderID.Valid {
+		photo["folder_id"] = int(folderID.Int64)
+	}
+	if urlPath != "" {
+		photo["url"] = "/p/" + urlPath
+	}
+	if title.Valid {
+		photo["title"] = title.String
+	}
+	if description.Valid {
+		photo["description"] = description.String
+	}
+	if note.Valid {
+		photo["note"] = note.String
+	}
+	if blurhash.Valid {
+		photo["blurhash"] = blurhash.String
+	}
+	if takenAt.Valid {
+		photo["taken_at"] = takenAt.Time.Format(time.RFC3339)
+	}
+	if exifData != nil {
+		var exif map[string]interface{}
+		if json.Unmarshal(exifData, &exif) == nil {
+			photo["exif"] = exif
+		}
+	}
+
+	h.jsonResponse(w, photo)
 }

@@ -693,3 +693,46 @@ a.nav-btn:hover {
 @media (max-width: 360px) {
     .folders-grid { grid-template-columns: 1fr; }
 }
+
+/* ===== Skeleton Loading ===== */
+
+.skeleton {
+    background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+    border-radius: var(--radius);
+}
+
+@keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.photo-item.skeleton-item {
+    aspect-ratio: 4/3;
+    min-height: 150px;
+}
+
+.photo-item.skeleton-item.landscape { aspect-ratio: 16/10; }
+.photo-item.skeleton-item.portrait { aspect-ratio: 3/4; }
+.photo-item.skeleton-item.square { aspect-ratio: 1/1; }
+
+.photo-item img {
+    width: 100%;
+    display: block;
+    transition: opacity 0.3s;
+    background: var(--bg-secondary);
+}
+
+.photo-item img.lazy {
+    opacity: 0;
+    min-height: 100px;
+}
+
+.photo-item img.loaded {
+    opacity: 1;
+}
+
+.photo-item[data-aspect] img {
+    aspect-ratio: attr(data-aspect);
+}

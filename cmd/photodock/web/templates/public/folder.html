@@ -116,11 +116,11 @@
                 <h2>Photos</h2>
                 <div class="masonry" id="gallery" data-total="{{len .Photos}}" data-folder="{{.Folder.ID}}">
                     {{range .Photos}}
-                    <a href="{{if .URLPath}}/p/{{.URLPath}}{{else}}/photo/{{.ID}}{{end}}" class="photo-item" data-id="{{.ID}}" data-name="{{.Filename}}" data-size="{{.SizeBytes}}" data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
-                        <img class="lazy" data-src="/thumb/small/{{.ID}}"
-                             {{if .Blurhash.Valid}}data-placeholder="/placeholder/{{.ID}}"{{end}}
-                             alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}"
-                             loading="lazy">
+                    <a href="{{if .URLPath}}/p/{{.URLPath}}{{else}}/photo/{{.ID}}{{end}}" class="photo-item skeleton-item skeleton" data-id="{{.ID}}" data-name="{{.Filename}}" data-size="{{.SizeBytes}}" data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}" {{if and .Width .Height}}data-aspect="{{printf "%.2f" (divf .Width .Height)}}"{{end}}>
+                    <img class="lazy" data-src="/thumb/small/{{.ID}}"
+                         {{if .Blurhash.Valid}}data-placeholder="/placeholder/{{.ID}}"{{end}}
+                         alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}"
+                         loading="lazy">
                     </a>
                     {{end}}
                 </div>
