@@ -3,81 +3,25 @@
     let isLoading = false;
     let hasMore = true;
     let observer = null;
-    let imageObserver = null;
-
-    function createSkeletons(container, count) {
-        const types = ['landscape', 'portrait', 'square', 'landscape'];
-        for (let i = 0; i < count; i++) {
-            const skeleton = document.createElement('div');
-            skeleton.className = `photo-item skeleton-item skeleton ${types[i % types.length]}`;
-            skeleton.dataset.skeleton = 'true';
-            container.appendChild(skeleton);
-        }
-    }
-
-    function removeSkeletons(container) {
-        const skeletons = container.querySelectorAll('[data-skeleton="true"]');
-        skeletons.forEach(s => s.remove());
-    }
 
     function initLazyLoading() {
-        const lazyImages = document.querySelectorAll('img.lazy:not([data-observed])');
+        document.querySelectorAll('.progressive-image').forEach(container => {
+            const fullImage = container.querySelector('.full-image');
+            if (!fullImage) return;
 
-        if (!imageObserver && 'IntersectionObserver' in window) {
-            imageObserver = new IntersectionObserver((entries, obs) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        loadImage(entry.target);
-                        obs.unobserve(entry.target);
-                    }
-                });
-            }, { rootMargin: '300px 0px', threshold: 0.01 });
-        }
-
-        lazyImages.forEach(img => {
-            img.dataset.observed = 'true';
-            if (imageObserver) {
-                imageObserver.observe(img);
+            if (fullImage.complete && fullImage.naturalHeight > 0) {
+                container.classList.add('loaded');
             } else {
-                loadImage(img);
+                fullImage.addEventListener('load', function() {
+                    container.classList.add('loaded');
+                }, { once: true });
+
+                fullImage.addEventListener('error', function() {
+                    container.classList.add('loaded');
+                    container.classList.add('load-error');
+                }, { once: true });
             }
         });
-    }
-
-    function loadImage(img) {
-        const src = img.dataset.src;
-        if (!src) return;
-
-        const placeholder = img.dataset.placeholder;
-        if (placeholder) {
-            img.src = placeholder;
-            img.classList.add('loading');
-        }
-
-        const fullImg = new Image();
-        fullImg.onload = () => {
-            img.src = src;
-            img.classList.remove('loading', 'lazy');
-            img.classList.add('loaded');
-
-            const parent = img.closest('.photo-item');
-            if (parent) {
-                parent.classList.remove('skeleton-item', 'skeleton');
-                if (fullImg.naturalWidth && fullImg.naturalHeight) {
-                    const ratio = fullImg.naturalWidth / fullImg.naturalHeight;
-                    parent.dataset.aspect = ratio.toFixed(2);
-                }
-            }
-        };
-        fullImg.onerror = () => {
-            img.classList.remove('loading', 'lazy');
-            img.classList.add('loaded');
-            const parent = img.closest('.photo-item');
-            if (parent) {
-                parent.classList.remove('skeleton-item', 'skeleton');
-            }
-        };
-        fullImg.src = src;
     }
 
     function initFolderLazyLoading() {
@@ -103,7 +47,7 @@
                         obs.unobserve(img);
                     }
                 });
-            }, { rootMargin: '100px 0px', threshold: 0.01 });
+            }, { rootMargin: '100px 0px', threshold: 0 });
 
             folderImages.forEach(img => {
                 img.dataset.observed = 'true';
@@ -121,6 +65,54 @@
         }
     }
 
+    function initMasonry() {
+        const gallery = document.getElementById('gallery');
+        if (!gallery || !gallery.classList.contains('masonry')) return;
+
+        const items = gallery.querySelectorAll('.photo-item');
+        const gap = 15;
+
+        function layoutMasonry() {
+            requestAnimationFrame(() => {
+                items.forEach(item => {
+                    const container = item.querySelector('.progressive-image');
+                    if (container) {
+                        const height = container.offsetHeight || container.getBoundingClientRect().height;
+                        if (height > 0) {
+                            item.style.gridRowEnd = `span ${Math.ceil(height + gap)}`;
+                        }
+                    }
+                });
+            });
+        }
+
+        layoutMasonry();
+
+        setTimeout(layoutMasonry, 200);
+        setTimeout(layoutMasonry, 500);
+
+        const resizeObserver = new ResizeObserver(() => {
+            layoutMasonry();
+        });
+
+        items.forEach(item => {
+            const container = item.querySelector('.progressive-image');
+            if (container) {
+                resizeObserver.observe(container);
+            }
+        });
+
+        const mutationObserver = new MutationObserver((mutations) => {
+            mutations.forEach(mutation => {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    setTimeout(layoutMasonry, 100);
+                }
+            });
+        });
+
+        mutationObserver.observe(gallery, { childList: true });
+    }
+
     function initInfiniteScroll() {
         const gallery = document.getElementById('gallery');
         const trigger = document.getElementById('load-more-trigger');
@@ -128,7 +120,7 @@
         if (!gallery || !trigger) return;
 
         const totalPhotos = parseInt(gallery.dataset.total || '0');
-        const loadedPhotos = gallery.querySelectorAll('.photo-item:not([data-skeleton])').length;
+        const loadedPhotos = gallery.querySelectorAll('.photo-item').length;
         hasMore = loadedPhotos < totalPhotos;
 
         if (!hasMore) {
@@ -156,8 +148,6 @@
             trigger.innerHTML = '<div class="load-more-spinner"></div>';
         }
 
-        createSkeletons(gallery, 6);
-
         currentPage++;
         const url = new URL(window.location);
         url.searchParams.set('page', currentPage);
@@ -166,8 +156,6 @@
         try {
             const res = await fetch(url);
             const data = await res.json();
-
-            removeSkeletons(gallery);
 
             if (data.photos && data.photos.length > 0) {
                 appendPhotos(data.photos);
@@ -184,7 +172,6 @@
             }
         } catch (err) {
             console.error('Failed to load more photos:', err);
-            removeSkeletons(gallery);
             if (trigger) {
                 trigger.innerHTML = '<span class="load-more-end">Failed to load</span>';
             }
@@ -206,36 +193,33 @@
             a.dataset.size = photo.size;
             a.dataset.date = photo.date;
 
-            const img = document.createElement('img');
-            img.className = 'lazy';
-            img.dataset.src = `/thumb/small/${photo.id}`;
-            if (photo.blurhash) {
-                img.dataset.placeholder = `/placeholder/${photo.id}`;
-            }
-            img.alt = photo.title || photo.filename;
-            img.loading = 'lazy';
+            const aspectRatio = photo.width && photo.height ? (photo.width / photo.height) : (4/3);
+            const aspectStyle = photo.width && photo.height
+                ? `aspect-ratio: ${photo.width}/${photo.height}`
+                : 'aspect-ratio: 4/3; min-height: 200px';
 
-            a.appendChild(img);
-            gallery.appendChild(a);
+            a.innerHTML = `
+                <div class="progressive-image" style="${aspectStyle}">
+                    <div class="skeleton-shimmer"></div>
+                    ${photo.blurhash ? `<img class="placeholder" src="/placeholder/${photo.id}" alt="" aria-hidden="true">` : ''}
+                    <img class="full-image" src="/thumb/small/${photo.id}" 
+                         alt="${photo.title || photo.filename}" loading="lazy"
+                         ${photo.width ? `width="${photo.width}"` : ''} ${photo.height ? `height="${photo.height}"` : ''}
+                         onload="this.parentElement.classList.add('loaded')">
+                </div>
+            `;
+
+            gallery.insertBefore(a, document.getElementById('load-more-trigger'));
         });
 
         initLazyLoading();
+        initMasonry();
     }
 
     function init() {
-        const gallery = document.getElementById('gallery');
-        if (gallery) {
-            const existingItems = gallery.querySelectorAll('.photo-item');
-            existingItems.forEach(item => {
-                const img = item.querySelector('img.lazy');
-                if (img && !img.classList.contains('loaded')) {
-                    item.classList.add('skeleton-item', 'skeleton');
-                }
-            });
-        }
-
         initLazyLoading();
         initFolderLazyLoading();
+        initMasonry();
         initInfiniteScroll();
     }
 
@@ -247,4 +231,5 @@
 
     window.initGalleryLazyLoading = initLazyLoading;
     window.initFolderLazyLoading = initFolderLazyLoading;
+    window.initMasonry = initMasonry;
 })();

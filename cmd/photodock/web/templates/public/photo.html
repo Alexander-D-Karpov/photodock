@@ -87,30 +87,59 @@
                 </div>
                 {{end}}
 
-                <h3>Camera</h3>
+                {{if or .ExifInfo.Aperture .ExifInfo.ShutterSpeed .ExifInfo.ISO .ExifInfo.FocalLength}}
+                <div class="quick-exif">
+                    {{if .ExifInfo.Aperture}}
+                    <div class="quick-exif-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                        <span>{{.ExifInfo.Aperture}}</span>
+                    </div>
+                    {{end}}
+                    {{if .ExifInfo.ShutterSpeed}}
+                    <div class="quick-exif-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>{{.ExifInfo.ShutterSpeed}}</span>
+                    </div>
+                    {{end}}
+                    {{if .ExifInfo.ISO}}
+                    <div class="quick-exif-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+                        <span>ISO {{.ExifInfo.ISO}}</span>
+                    </div>
+                    {{end}}
+                    {{if .ExifInfo.FocalLength}}
+                    <div class="quick-exif-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h5l2-9l6 18l2-9h5"/></svg>
+                        <span>{{.ExifInfo.FocalLength}}</span>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+
+                {{if or .ExifInfo.CameraModel .ExifInfo.LensModel}}
+                <h3>Camera & Lens</h3>
                 <dl class="exif-list">
                     {{if .ExifInfo.CameraModel}}<dt>Camera</dt><dd>{{if and .ExifInfo.CameraMake (not (hasPrefix .ExifInfo.CameraModel .ExifInfo.CameraMake))}}{{.ExifInfo.CameraMake}} {{end}}{{.ExifInfo.CameraModel}}</dd>{{end}}
                     {{if .ExifInfo.LensModel}}<dt>Lens</dt><dd>{{.ExifInfo.LensModel}}</dd>{{end}}
-                    {{if .ExifInfo.FocalLength}}<dt>Focal Length</dt><dd>{{.ExifInfo.FocalLength}}{{if .ExifInfo.FocalLength35mm}} ({{.ExifInfo.FocalLength35mm}} eq.){{end}}</dd>{{end}}
-                    {{if .ExifInfo.Aperture}}<dt>Aperture</dt><dd>{{.ExifInfo.Aperture}}</dd>{{end}}
-                    {{if .ExifInfo.ShutterSpeed}}<dt>Shutter</dt><dd>{{.ExifInfo.ShutterSpeed}}</dd>{{end}}
-                    {{if .ExifInfo.ISO}}<dt>ISO</dt><dd>{{.ExifInfo.ISO}}</dd>{{end}}
-                    {{if .ExifInfo.DateTimeOriginal}}<dt>Date Taken</dt><dd>{{.ExifInfo.DateTimeOriginal}}</dd>{{end}}
+                    {{if .ExifInfo.FocalLength35mm}}<dt>35mm Equivalent</dt><dd>{{.ExifInfo.FocalLength35mm}}</dd>{{end}}
                 </dl>
+                {{end}}
 
-                <details class="more-exif">
-                    <summary>Exposure Details</summary>
+                {{if or .ExifInfo.ExposureMode .ExifInfo.MeteringMode .ExifInfo.ExposureComp}}
+                <details class="more-exif" open>
+                    <summary>Exposure</summary>
                     <dl class="exif-list">
-                        {{if .ExifInfo.ExposureComp}}<dt>Exposure Comp</dt><dd>{{.ExifInfo.ExposureComp}}</dd>{{end}}
-                        {{if .ExifInfo.ExposureMode}}<dt>Exposure Mode</dt><dd>{{.ExifInfo.ExposureMode}}</dd>{{end}}
-                        {{if .ExifInfo.ExposureProgram}}<dt>Exposure Program</dt><dd>{{.ExifInfo.ExposureProgram}}</dd>{{end}}
+                        {{if .ExifInfo.ExposureMode}}<dt>Mode</dt><dd>{{.ExifInfo.ExposureMode}}</dd>{{end}}
+                        {{if .ExifInfo.ExposureProgram}}<dt>Program</dt><dd>{{.ExifInfo.ExposureProgram}}</dd>{{end}}
                         {{if .ExifInfo.MeteringMode}}<dt>Metering</dt><dd>{{.ExifInfo.MeteringMode}}</dd>{{end}}
+                        {{if .ExifInfo.ExposureComp}}<dt>Compensation</dt><dd>{{.ExifInfo.ExposureComp}}</dd>{{end}}
                         {{if .ExifInfo.LightValue}}<dt>Light Value</dt><dd>{{.ExifInfo.LightValue}}</dd>{{end}}
                         {{if .ExifInfo.BrightnessValue}}<dt>Brightness</dt><dd>{{.ExifInfo.BrightnessValue}}</dd>{{end}}
-                        {{if .ExifInfo.GainControl}}<dt>Gain Control</dt><dd>{{.ExifInfo.GainControl}}</dd>{{end}}
                     </dl>
                 </details>
+                {{end}}
 
+                {{if or .ExifInfo.Flash .ExifInfo.WhiteBalance}}
                 <details class="more-exif">
                     <summary>Flash & White Balance</summary>
                     <dl class="exif-list">
@@ -121,7 +150,9 @@
                         {{if .ExifInfo.ColorTemperature}}<dt>Color Temp</dt><dd>{{.ExifInfo.ColorTemperature}} K</dd>{{end}}
                     </dl>
                 </details>
+                {{end}}
 
+                {{if or .ExifInfo.FocusMode .ExifInfo.FocusDistance .ExifInfo.MaxApertureValue}}
                 <details class="more-exif">
                     <summary>Focus & Lens</summary>
                     <dl class="exif-list">
@@ -131,10 +162,11 @@
                         {{if .ExifInfo.SubjectDistRange}}<dt>Distance Range</dt><dd>{{.ExifInfo.SubjectDistRange}}</dd>{{end}}
                         {{if .ExifInfo.MaxApertureValue}}<dt>Max Aperture</dt><dd>{{.ExifInfo.MaxApertureValue}}</dd>{{end}}
                         {{if .ExifInfo.DepthOfField}}<dt>Depth of Field</dt><dd>{{.ExifInfo.DepthOfField}}</dd>{{end}}
-                        {{if .ExifInfo.HyperfocalDist}}<dt>Hyperfocal Dist</dt><dd>{{.ExifInfo.HyperfocalDist}}</dd>{{end}}
                     </dl>
                 </details>
+                {{end}}
 
+                {{if or .ExifInfo.Contrast .ExifInfo.Saturation .ExifInfo.Sharpness .ExifInfo.ColorSpace}}
                 <details class="more-exif">
                     <summary>Image Processing</summary>
                     <dl class="exif-list">
@@ -145,7 +177,9 @@
                         {{if .ExifInfo.CustomRendered}}<dt>Custom Rendered</dt><dd>{{.ExifInfo.CustomRendered}}</dd>{{end}}
                     </dl>
                 </details>
+                {{end}}
 
+                {{if or .ExifInfo.SceneCaptureType .ExifInfo.ShootingMode .ExifInfo.DriveMode}}
                 <details class="more-exif">
                     <summary>Shooting Mode</summary>
                     <dl class="exif-list">
@@ -158,7 +192,9 @@
                         {{if .ExifInfo.ImageStabilization}}<dt>Stabilization</dt><dd>{{.ExifInfo.ImageStabilization}}</dd>{{end}}
                     </dl>
                 </details>
+                {{end}}
 
+                {{if or .ExifInfo.SensingMethod .ExifInfo.Quality .ExifInfo.FirmwareVersion .ExifInfo.SerialNumber}}
                 <details class="more-exif">
                     <summary>Technical Details</summary>
                     <dl class="exif-list">
@@ -169,9 +205,10 @@
                         {{if .ExifInfo.SerialNumber}}<dt>Serial Number</dt><dd>{{.ExifInfo.SerialNumber}}</dd>{{end}}
                         {{if .ExifInfo.CameraTemperature}}<dt>Camera Temp</dt><dd>{{.ExifInfo.CameraTemperature}}</dd>{{end}}
                         {{if .ExifInfo.FileNumber}}<dt>File Number</dt><dd>{{.ExifInfo.FileNumber}}</dd>{{end}}
-                        {{if .ExifInfo.ImageUniqueID}}<dt>Unique ID</dt><dd style="font-size: 0.75rem; word-break: break-all;">{{.ExifInfo.ImageUniqueID}}</dd>{{end}}
+                        {{if .ExifInfo.ImageUniqueID}}<dt>Unique ID</dt><dd style="font-size: 0.7rem; word-break: break-all;">{{.ExifInfo.ImageUniqueID}}</dd>{{end}}
                     </dl>
                 </details>
+                {{end}}
 
                 {{if or .ExifInfo.Artist .ExifInfo.Copyright .ExifInfo.OwnerName .ExifInfo.Software}}
                 <details class="more-exif">
@@ -185,11 +222,12 @@
                 </details>
                 {{end}}
 
-                <h3>File</h3>
+                <h3>File Info</h3>
                 <dl class="exif-list">
                     <dt>Filename</dt><dd>{{.Photo.Filename}}</dd>
                     <dt>Dimensions</dt><dd>{{.Photo.Width}} × {{.Photo.Height}}</dd>
                     <dt>Size</dt><dd>{{formatSize .Photo.SizeBytes}}</dd>
+                    {{if .ExifInfo.DateTimeOriginal}}<dt>Date Taken</dt><dd>{{.ExifInfo.DateTimeOriginal}}</dd>{{end}}
                     <dt>Path</dt><dd class="path-value">/p/{{.Photo.URLPath}}</dd>
                 </dl>
 
