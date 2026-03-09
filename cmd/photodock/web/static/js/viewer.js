@@ -39,6 +39,8 @@ function initViewer(opts) {
             window.location.href = opts.prevUrl;
         } else if (e.key === 'ArrowRight' && opts.nextUrl) {
             window.location.href = opts.nextUrl;
+        } else if (e.key === 'r' || e.key === 'R') {
+            window.location.href = '/random';
         } else if (e.key === 'Escape') {
             if (state.scale > 1.01) reset();
             else goBack();

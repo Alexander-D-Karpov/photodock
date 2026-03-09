@@ -55,6 +55,12 @@ func (db *DB) Migrate() error {
 	END $$;
 
 	CREATE INDEX IF NOT EXISTS idx_photos_url_path ON photos(url_path);
+
+	CREATE TABLE IF NOT EXISTS photo_stats_cache (
+		key TEXT PRIMARY KEY,
+		data JSONB NOT NULL,
+		updated_at TIMESTAMPTZ DEFAULT NOW()
+	);
 	`
 	_, err := db.pool.Exec(context.Background(), schema)
 	return err

@@ -12,6 +12,9 @@
 <div class="index-container">
     <header class="index-header">
         <div class="index-header-controls">
+            <a href="/random" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.9rem;">
+                {{template "icon-shuffle"}} Random
+            </a>
             <div class="sort-control">
                 <label for="sort-select">Sort:</label>
                 <select id="sort-select">
@@ -103,17 +106,15 @@
                     <a href="{{if .URLPath}}/p/{{.URLPath}}{{else}}/photo/{{.ID}}{{end}}" class="photo-item"
                        data-id="{{.ID}}" data-name="{{.Filename}}" data-size="{{.SizeBytes}}"
                        data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
-                        <div class="progressive-image" style="{{if and .Width .Height (gt .Width 0) (gt .Height 0)}}aspect-ratio: {{.Width}}/{{.Height}}{{else}}aspect-ratio: 4/3; min-height: 200px{{end}}">
+                        <div class="progressive-image" style="aspect-ratio: {{.Width}} / {{.Height}};">
                             <div class="skeleton-shimmer"></div>
                             {{if .Blurhash.Valid}}
-                            <img class="placeholder" src="/placeholder/{{.ID}}" alt="" aria-hidden="true">
+                            <img class="placeholder" src="/placeholder/{{.ID}}" alt="" aria-hidden="true" onload="this.classList.add('ready')">
                             {{end}}
                             <img class="full-image"
                                  src="/thumb/small/{{.ID}}"
                                  alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}"
-                                 {{if and .Width .Height (gt .Width 0) (gt .Height 0)}}width="{{.Width}}" height="{{.Height}}"{{end}}
-                                 loading="lazy"
-                                 onload="this.parentElement.classList.add('loaded')">
+                                 loading="lazy">
                         </div>
                     </a>
                     {{end}}

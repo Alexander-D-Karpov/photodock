@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -66,6 +67,7 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 		"sub":       func(a, b int) int { return a - b },
 		"int64":     func(i int) int64 { return int64(i) },
 		"urlpath":   escapeURLPath,
+		"mulf":      func(a, b float64) float64 { return a * b },
 		"hasPrefix": strings.HasPrefix,
 		"iterate": func(n int) []int {
 			result := make([]int, n)
@@ -159,6 +161,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /placeholder/{id}", h.servePlaceholder)
 
 	mux.HandleFunc("GET /admin", h.adminAuth(h.adminDashboard))
+	mux.HandleFunc("GET /admin/stats", h.adminAuth(h.adminStats))
+	mux.HandleFunc("GET /api/stats", h.adminAuth(h.apiStats))
 	mux.HandleFunc("GET /admin/folders", h.adminAuth(h.adminFolders))
 	mux.HandleFunc("POST /admin/folders", h.adminAuth(h.adminCreateFolder))
 	mux.HandleFunc("GET /admin/folders/{id}", h.adminAuth(h.adminEditFolder))
@@ -185,6 +189,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/folders/{id}", h.apiGetFolder)
 	mux.HandleFunc("GET /api/photos", h.apiListPhotos)
 	mux.HandleFunc("GET /api/photos/{id}", h.apiGetPhoto)
+	mux.HandleFunc("GET /api/random", h.apiRandomPhoto)
+	mux.HandleFunc("GET /random", h.publicRandomPhoto)
+	mux.HandleFunc("POST /admin/reprocess", h.adminAuth(h.adminReprocess))
 }
 
 func (h *Handlers) adminAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -461,6 +468,15 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		}
 	}
 
+	var colorInfo *models.ColorInfo
+	if photo.ExifData != nil {
+		var combined struct {
+			Colors *models.ColorInfo `json:"colors"`
+		}
+		_ = json.Unmarshal(photo.ExifData, &combined)
+		colorInfo = combined.Colors
+	}
+
 	h.render(w, "public/photo.html", map[string]interface{}{
 		"Photo":         photo,
 		"ExifInfo":      exifInfo,
@@ -476,6 +492,7 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		"BaseURL":       baseURL,
 		"PreviewWidth":  previewWidth,
 		"PreviewHeight": previewHeight,
+		"ColorInfo":     colorInfo,
 	})
 }
 
@@ -508,15 +525,16 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	contentType := "image/jpeg"
+	if strings.HasSuffix(strings.ToLower(path), ".png") {
+		contentType = "image/png"
+	}
+
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Content-Type", contentType)
 
 	if r.Header.Get("X-Real-IP") != "" {
 		w.Header().Set("X-Accel-Redirect", fmt.Sprintf("/internal/cache/%s/%d%s", size, id, filepath.Ext(thumbPath)))
-		contentType := "image/jpeg"
-		if strings.HasSuffix(strings.ToLower(path), ".png") {
-			contentType = "image/png"
-		}
-		w.Header().Set("Content-Type", contentType)
 		return
 	}
 
@@ -1156,15 +1174,41 @@ func (h *Handlers) adminUploadChunk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) render(w http.ResponseWriter, name string, data map[string]interface{}) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.tmpl.ExecuteTemplate(w, name, data); err != nil {
-		http.Error(w, err.Error(), 500)
+	var buf bytes.Buffer
+	if err := h.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+		log.Printf("ERROR render %s: %v", name, err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
 }
 
 func (h *Handlers) jsonResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(data)
+}
+
+func LoggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rw, r)
+		duration := time.Since(start)
+		if rw.status >= 400 || duration > 2*time.Second {
+			log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, duration)
+		}
+	})
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
 func (h *Handlers) getPhotoByID(ctx context.Context, id int) (*models.Photo, error) {
@@ -1844,4 +1888,226 @@ func (h *Handlers) apiGetPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.jsonResponse(w, photo)
+}
+
+func (h *Handlers) apiRandomPhoto(w http.ResponseWriter, r *http.Request) {
+	var id int
+	var urlPath string
+	err := h.db.Pool().QueryRow(r.Context(),
+		`SELECT id, COALESCE(url_path, '') FROM photos 
+		WHERE hidden = false ORDER BY RANDOM() LIMIT 1`).Scan(&id, &urlPath)
+	if err != nil {
+		http.Error(w, "no photos", 404)
+		return
+	}
+	u := fmt.Sprintf("/photo/%d", id)
+	if urlPath != "" {
+		u = "/p/" + urlPath
+	}
+	h.jsonResponse(w, map[string]interface{}{"id": id, "url": u})
+}
+
+func (h *Handlers) publicRandomPhoto(w http.ResponseWriter, r *http.Request) {
+	var count int
+	_ = h.db.Pool().QueryRow(r.Context(), "SELECT COUNT(*) FROM photos WHERE hidden = false").Scan(&count)
+	if count == 0 {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	var id int
+	var urlPath string
+	_ = h.db.Pool().QueryRow(r.Context(),
+		`SELECT id, COALESCE(url_path, '') FROM photos WHERE hidden = false 
+		OFFSET floor(random() * $1) LIMIT 1`, count).Scan(&id, &urlPath)
+	if urlPath != "" {
+		http.Redirect(w, r, "/p/"+urlPath, http.StatusFound)
+	} else {
+		http.Redirect(w, r, fmt.Sprintf("/photo/%d", id), http.StatusFound)
+	}
+}
+
+func (h *Handlers) adminStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	stats := h.collectStats(ctx)
+	h.render(w, "admin/stats.html", map[string]interface{}{
+		"Stats": stats,
+		"Title": "Statistics",
+	})
+}
+
+func (h *Handlers) apiStats(w http.ResponseWriter, r *http.Request) {
+	h.jsonResponse(w, h.collectStats(r.Context()))
+}
+
+func (h *Handlers) collectStats(ctx context.Context) map[string]interface{} {
+	stats := make(map[string]interface{})
+
+	var photoCount, folderCount, hiddenCount int
+	var totalSize int64
+	var avgWidth, avgHeight float64
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE hidden = false").Scan(&photoCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM folders").Scan(&folderCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COUNT(*) FROM photos WHERE hidden = true").Scan(&hiddenCount)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COALESCE(SUM(size_bytes), 0) FROM photos").Scan(&totalSize)
+	_ = h.db.Pool().QueryRow(ctx, "SELECT COALESCE(AVG(width), 0), COALESCE(AVG(height), 0) FROM photos WHERE hidden = false").Scan(&avgWidth, &avgHeight)
+
+	stats["overview"] = map[string]interface{}{
+		"photo_count":  photoCount,
+		"folder_count": folderCount,
+		"hidden_count": hiddenCount,
+		"total_size":   totalSize,
+		"avg_width":    int(avgWidth),
+		"avg_height":   int(avgHeight),
+	}
+
+	type kv struct {
+		Key   string `json:"key"`
+		Count int    `json:"count"`
+	}
+
+	cameras := []kv{}
+	rows, _ := h.db.Pool().Query(ctx, `
+		SELECT exif_data->>'camera_model' as camera, COUNT(*) as cnt 
+		FROM photos WHERE exif_data->>'camera_model' != '' AND hidden = false
+		GROUP BY camera ORDER BY cnt DESC LIMIT 20`)
+	if rows != nil {
+		for rows.Next() {
+			var item kv
+			_ = rows.Scan(&item.Key, &item.Count)
+			cameras = append(cameras, item)
+		}
+		rows.Close()
+	}
+	stats["cameras"] = cameras
+
+	lenses := []kv{}
+	rows, _ = h.db.Pool().Query(ctx, `
+		SELECT exif_data->>'lens_model' as lens, COUNT(*) as cnt 
+		FROM photos WHERE exif_data->>'lens_model' != '' AND hidden = false
+		GROUP BY lens ORDER BY cnt DESC LIMIT 20`)
+	if rows != nil {
+		for rows.Next() {
+			var item kv
+			_ = rows.Scan(&item.Key, &item.Count)
+			lenses = append(lenses, item)
+		}
+		rows.Close()
+	}
+	stats["lenses"] = lenses
+
+	focalLengths := []kv{}
+	rows, _ = h.db.Pool().Query(ctx, `
+		SELECT exif_data->>'focal_length' as fl, COUNT(*) as cnt 
+		FROM photos WHERE exif_data->>'focal_length' != '' AND hidden = false
+		GROUP BY fl ORDER BY cnt DESC LIMIT 20`)
+	if rows != nil {
+		for rows.Next() {
+			var item kv
+			_ = rows.Scan(&item.Key, &item.Count)
+			focalLengths = append(focalLengths, item)
+		}
+		rows.Close()
+	}
+	stats["focal_lengths"] = focalLengths
+
+	apertures := []kv{}
+	rows, _ = h.db.Pool().Query(ctx, `
+		SELECT exif_data->>'aperture' as ap, COUNT(*) as cnt 
+		FROM photos WHERE exif_data->>'aperture' != '' AND hidden = false
+		GROUP BY ap ORDER BY cnt DESC LIMIT 20`)
+	if rows != nil {
+		for rows.Next() {
+			var item kv
+			_ = rows.Scan(&item.Key, &item.Count)
+			apertures = append(apertures, item)
+		}
+		rows.Close()
+	}
+	stats["apertures"] = apertures
+
+	isoRanges := []kv{}
+	rows, _ = h.db.Pool().Query(ctx, `
+		SELECT CASE
+			WHEN (exif_data->>'iso')::int <= 100 THEN '≤100'
+			WHEN (exif_data->>'iso')::int <= 400 THEN '101-400'
+			WHEN (exif_data->>'iso')::int <= 1600 THEN '401-1600'
+			WHEN (exif_data->>'iso')::int <= 6400 THEN '1601-6400'
+			ELSE '>6400'
+		END as iso_range, COUNT(*) as cnt
+		FROM photos WHERE exif_data->>'iso' != '' AND exif_data->>'iso' != '0' AND hidden = false
+		GROUP BY iso_range ORDER BY cnt DESC`)
+	if rows != nil {
+		for rows.Next() {
+			var item kv
+			_ = rows.Scan(&item.Key, &item.Count)
+			isoRanges = append(isoRanges, item)
+		}
+		rows.Close()
+	}
+	stats["iso_ranges"] = isoRanges
+
+	type monthCount struct {
+		Month string `json:"month"`
+		Count int    `json:"count"`
+	}
+	timeline := []monthCount{}
+	rows, _ = h.db.Pool().Query(ctx, `
+		SELECT TO_CHAR(COALESCE(taken_at, created_at), 'YYYY-MM') as month, COUNT(*) as cnt
+		FROM photos WHERE hidden = false
+		GROUP BY month ORDER BY month DESC LIMIT 36`)
+	if rows != nil {
+		for rows.Next() {
+			var item monthCount
+			_ = rows.Scan(&item.Month, &item.Count)
+			timeline = append(timeline, item)
+		}
+		rows.Close()
+	}
+	stats["timeline"] = timeline
+
+	exposureModes := []kv{}
+	rows, _ = h.db.Pool().Query(ctx, `
+		SELECT exif_data->>'exposure_mode' as mode, COUNT(*) as cnt
+		FROM photos WHERE exif_data->>'exposure_mode' != '' AND hidden = false
+		GROUP BY mode ORDER BY cnt DESC`)
+	if rows != nil {
+		for rows.Next() {
+			var item kv
+			_ = rows.Scan(&item.Key, &item.Count)
+			exposureModes = append(exposureModes, item)
+		}
+		rows.Close()
+	}
+	stats["exposure_modes"] = exposureModes
+
+	type cameraSize struct {
+		Camera  string  `json:"camera"`
+		AvgSize float64 `json:"avg_size"`
+		Count   int     `json:"count"`
+	}
+	var cameraSizes []cameraSize
+	rows, _ = h.db.Pool().Query(ctx, `
+		SELECT exif_data->>'camera_model', AVG(size_bytes), COUNT(*)
+		FROM photos WHERE exif_data->>'camera_model' != '' AND hidden = false
+		GROUP BY exif_data->>'camera_model' ORDER BY COUNT(*) DESC LIMIT 10`)
+	if rows != nil {
+		for rows.Next() {
+			var item cameraSize
+			_ = rows.Scan(&item.Camera, &item.AvgSize, &item.Count)
+			cameraSizes = append(cameraSizes, item)
+		}
+		rows.Close()
+	}
+	stats["camera_sizes"] = cameraSizes
+
+	return stats
+}
+
+func (h *Handlers) adminReprocess(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		if err := h.scanSvc.ReprocessAllMetadata(context.Background()); err != nil {
+			log.Printf("reprocess error: %v", err)
+		}
+	}()
+	h.jsonResponse(w, map[string]string{"status": "started"})
 }

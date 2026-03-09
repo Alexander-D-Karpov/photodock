@@ -131,3 +131,12 @@ type ExifInfo struct {
 	FileNumber        string `json:"file_number,omitempty"`
 	ImageUniqueID     string `json:"image_unique_id,omitempty"`
 }
+
+type ColorInfo struct {
+	DominantColor string   `json:"dominant_color"`
+	Palette       []string `json:"palette"`
+	AvgBrightness float64  `json:"avg_brightness"`
+	IsLandscape   bool     `json:"is_landscape"`
+	AspectRatio   float64  `json:"aspect_ratio"`
+	MegaPixels    float64  `json:"megapixels"`
+}

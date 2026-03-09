@@ -10,15 +10,16 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="{{.Title}}">
     {{if .Photo.Description.Valid}}<meta property="og:description" content="{{.Photo.Description.String}}">{{end}}
-    <meta property="og:image" content="{{.BaseURL}}/thumb/large/{{.Photo.ID}}">
+    <meta property="og:image" content="{{.BaseURL}}/thumb/medium/{{.Photo.ID}}">
     <meta property="og:image:width" content="{{.PreviewWidth}}">
     <meta property="og:image:height" content="{{.PreviewHeight}}">
+    <meta property="og:image:type" content="image/jpeg">
     <meta property="og:url" content="{{.BaseURL}}/p/{{.Photo.URLPath}}">
 
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{{.Title}}">
     {{if .Photo.Description.Valid}}<meta name="twitter:description" content="{{.Photo.Description.String}}">{{end}}
-    <meta name="twitter:image" content="{{.BaseURL}}/thumb/large/{{.Photo.ID}}">
+    <meta name="twitter:image" content="{{.BaseURL}}/thumb/medium/{{.Photo.ID}}">
 
     {{if .NextURL}}<link rel="prefetch" href="{{.NextURL}}">{{end}}
     {{if .PrevURL}}<link rel="prefetch" href="{{.PrevURL}}">{{end}}
@@ -41,6 +42,9 @@
             {{if .PrevURL}}
             <a href="{{.PrevURL}}" class="btn-icon header-nav-btn" title="Previous (←)">{{template "icon-chevron-left"}}</a>
             {{end}}
+            <a href="/random" class="btn-icon" title="Random photo (R)">
+                {{template "icon-shuffle"}}
+            </a>
             {{if .NextURL}}
             <a href="{{.NextURL}}" class="btn-icon header-nav-btn" title="Next (→)">{{template "icon-chevron-right"}}</a>
             {{end}}
@@ -91,25 +95,25 @@
                 <div class="quick-exif">
                     {{if .ExifInfo.Aperture}}
                     <div class="quick-exif-item">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
                         <span>{{.ExifInfo.Aperture}}</span>
                     </div>
                     {{end}}
                     {{if .ExifInfo.ShutterSpeed}}
                     <div class="quick-exif-item">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                         <span>{{.ExifInfo.ShutterSpeed}}</span>
                     </div>
                     {{end}}
                     {{if .ExifInfo.ISO}}
                     <div class="quick-exif-item">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
                         <span>ISO {{.ExifInfo.ISO}}</span>
                     </div>
                     {{end}}
                     {{if .ExifInfo.FocalLength}}
                     <div class="quick-exif-item">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h5l2-9l6 18l2-9h5"/></svg>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h5l2-9l6 18l2-9h5"/></svg>
                         <span>{{.ExifInfo.FocalLength}}</span>
                     </div>
                     {{end}}
@@ -206,6 +210,24 @@
                         {{if .ExifInfo.CameraTemperature}}<dt>Camera Temp</dt><dd>{{.ExifInfo.CameraTemperature}}</dd>{{end}}
                         {{if .ExifInfo.FileNumber}}<dt>File Number</dt><dd>{{.ExifInfo.FileNumber}}</dd>{{end}}
                         {{if .ExifInfo.ImageUniqueID}}<dt>Unique ID</dt><dd style="font-size: 0.7rem; word-break: break-all;">{{.ExifInfo.ImageUniqueID}}</dd>{{end}}
+                        {{if .ColorInfo}}
+                        <h3>Image Analysis</h3>
+                        <dl class="exif-list">
+                            <dt>Megapixels</dt><dd>{{printf "%.1f" .ColorInfo.MegaPixels}} MP</dd>
+                            <dt>Aspect Ratio</dt><dd>{{printf "%.2f" .ColorInfo.AspectRatio}}:1 ({{if .ColorInfo.IsLandscape}}Landscape{{else}}Portrait{{end}})</dd>
+                            <dt>Avg Brightness</dt><dd>{{printf "%.0f" (mulf .ColorInfo.AvgBrightness 100)}}%</dd>
+                            {{if .ColorInfo.Palette}}
+                            <dt>Palette</dt>
+                            <dd>
+                                <div class="color-palette">
+                                    {{range .ColorInfo.Palette}}
+                                    <div class="color-swatch" style="background:{{.}}" title="{{.}}"></div>
+                                    {{end}}
+                                </div>
+                            </dd>
+                            {{end}}
+                        </dl>
+                        {{end}}
                     </dl>
                 </details>
                 {{end}}

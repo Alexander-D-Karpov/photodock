@@ -1,0 +1,138 @@
+{{define "admin/stats.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="/static/css/admin.css">
+    <style>
+        .stats-section { margin-bottom: 40px; }
+        .stats-section h2 { margin-bottom: 15px; font-size: 1.1rem; }
+        .bar-chart { display: flex; flex-direction: column; gap: 8px; }
+        .bar-row { display: flex; align-items: center; gap: 12px; }
+        .bar-label { width: 200px; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+        .bar-track { flex: 1; height: 24px; background: var(--border); border-radius: 4px; overflow: hidden; }
+        .bar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; min-width: 2px; }
+        .bar-count { width: 50px; text-align: right; font-size: 0.85rem; color: var(--text-secondary); flex-shrink: 0; }
+        .timeline-chart { display: flex; align-items: flex-end; gap: 3px; height: 150px; padding: 10px 0; overflow-x: auto; }
+        .timeline-bar { flex: 1; min-width: 20px; background: var(--accent); border-radius: 3px 3px 0 0; position: relative; cursor: pointer; transition: opacity 0.2s; }
+        .timeline-bar:hover { opacity: 0.8; }
+        .timeline-bar:hover::after { content: attr(data-label); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--bg-secondary); padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; white-space: nowrap; border: 1px solid var(--border); }
+        .color-palette { display: flex; gap: 4px; }
+        .color-swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border); }
+    </style>
+</head>
+<body>
+<div class="admin-container">
+    <nav class="admin-nav">
+        <a href="/admin">{{template "icon-home"}} Dashboard</a>
+        <a href="/admin/folders">{{template "icon-folder-small"}} Folders</a>
+        <a href="/admin/photos">{{template "icon-image"}} Photos</a>
+        <a href="/admin/stats" class="active">{{template "icon-scan"}} Stats</a>
+        <a href="/" target="_blank">{{template "icon-external"}} View Site</a>
+    </nav>
+
+    <main class="admin-main">
+        <h1>Statistics</h1>
+
+        <div class="stats-grid">
+            {{with .Stats.overview}}
+            <div class="stat-card"><span class="stat-value">{{.photo_count}}</span><span class="stat-label">Photos</span></div>
+            <div class="stat-card"><span class="stat-value">{{.folder_count}}</span><span class="stat-label">Folders</span></div>
+            <div class="stat-card"><span class="stat-value">{{formatSize .total_size}}</span><span class="stat-label">Total Size</span></div>
+            <div class="stat-card"><span class="stat-value">{{.avg_width}}×{{.avg_height}}</span><span class="stat-label">Avg Resolution</span></div>
+            {{end}}
+        </div>
+
+        {{if .Stats.timeline}}
+        <div class="stats-section">
+            <h2>Photos Over Time</h2>
+            <div class="timeline-chart" id="timeline-chart"></div>
+        </div>
+        {{end}}
+
+        {{if .Stats.cameras}}
+        <div class="stats-section">
+            <h2>Cameras</h2>
+            <div class="bar-chart" id="cameras-chart"></div>
+        </div>
+        {{end}}
+
+        {{if .Stats.lenses}}
+        <div class="stats-section">
+            <h2>Lenses</h2>
+            <div class="bar-chart" id="lenses-chart"></div>
+        </div>
+        {{end}}
+
+        {{if .Stats.focal_lengths}}
+        <div class="stats-section">
+            <h2>Focal Lengths</h2>
+            <div class="bar-chart" id="focal-chart"></div>
+        </div>
+        {{end}}
+
+        {{if .Stats.apertures}}
+        <div class="stats-section">
+            <h2>Apertures</h2>
+            <div class="bar-chart" id="aperture-chart"></div>
+        </div>
+        {{end}}
+
+        {{if .Stats.iso_ranges}}
+        <div class="stats-section">
+            <h2>ISO Distribution</h2>
+            <div class="bar-chart" id="iso-chart"></div>
+        </div>
+        {{end}}
+
+        {{if .Stats.exposure_modes}}
+        <div class="stats-section">
+            <h2>Exposure Modes</h2>
+            <div class="bar-chart" id="exposure-chart"></div>
+        </div>
+        {{end}}
+    </main>
+</div>
+<script>
+    const stats = {{json .Stats}};
+
+    function renderBarChart(containerId, items) {
+        const el = document.getElementById(containerId);
+        if (!el || !items || items.length === 0) return;
+        const max = Math.max(...items.map(i => i.count || i.Count));
+        el.innerHTML = items.map(item => {
+            const label = item.key || item.Key || item.camera || '';
+            const count = item.count || item.Count || 0;
+            const pct = (count / max * 100).toFixed(1);
+            return `<div class="bar-row">
+                <span class="bar-label" title="${label}">${label}</span>
+                <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+                <span class="bar-count">${count}</span>
+            </div>`;
+        }).join('');
+    }
+
+    function renderTimeline(items) {
+        const el = document.getElementById('timeline-chart');
+        if (!el || !items || items.length === 0) return;
+        const reversed = [...items].reverse();
+        const max = Math.max(...reversed.map(i => i.count));
+        el.innerHTML = reversed.map(item => {
+            const pct = (item.count / max * 100).toFixed(1);
+            return `<div class="timeline-bar" style="height:${pct}%" data-label="${item.month}: ${item.count}"></div>`;
+        }).join('');
+    }
+
+    renderTimeline(stats.timeline);
+    renderBarChart('cameras-chart', stats.cameras);
+    renderBarChart('lenses-chart', stats.lenses);
+    renderBarChart('focal-chart', stats.focal_lengths);
+    renderBarChart('aperture-chart', stats.apertures);
+    renderBarChart('iso-chart', stats.iso_ranges);
+    renderBarChart('exposure-chart', stats.exposure_modes);
+</script>
+</body>
+</html>
+{{end}}

@@ -190,6 +190,13 @@ function performSearch() {
     window.location = url;
 }
 
+function reprocessMeta() {
+    if (!confirm('Reprocess metadata for ALL photos? This may take a while.')) return;
+    fetch('/admin/reprocess', { method: 'POST' })
+        .then(r => r.json())
+        .then(() => alert('Metadata reprocessing started. Check server logs for progress.'));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const folderSelect = document.getElementById('upload-folder');
     if (folderSelect && folderSelect.options.length <= 1) {

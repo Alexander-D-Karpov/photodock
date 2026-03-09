@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Alexander-D-Karpov/photodock/internal/models"
 	"github.com/disintegration/imaging"
 )
 
@@ -208,4 +209,76 @@ func (s *ThumbnailService) PrewarmCache() {
 
 func (s *ThumbnailService) CacheDir() string {
 	return s.cacheDir
+}
+
+func (s *ThumbnailService) AnalyzeColors(photoPath string) (*models.ColorInfo, error) {
+	srcPath := filepath.Join(s.mediaRoot, photoPath)
+	img, err := imaging.Open(srcPath, imaging.AutoOrientation(true))
+	if err != nil {
+		return nil, err
+	}
+
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+
+	info := &models.ColorInfo{
+		IsLandscape: w > h,
+		AspectRatio: float64(w) / float64(h),
+		MegaPixels:  float64(w*h) / 1_000_000,
+	}
+
+	tiny := imaging.Resize(img, 16, 16, imaging.Box)
+	tb := tiny.Bounds()
+
+	var totalR, totalG, totalB float64
+	var totalBright float64
+	colorCounts := make(map[string]int)
+	count := 0
+
+	for y := tb.Min.Y; y < tb.Max.Y; y++ {
+		for x := tb.Min.X; x < tb.Max.X; x++ {
+			r, g, b, _ := tiny.At(x, y).RGBA()
+			fr, fg, fb := float64(r>>8), float64(g>>8), float64(b>>8)
+			totalR += fr
+			totalG += fg
+			totalB += fb
+			totalBright += (0.299*fr + 0.587*fg + 0.114*fb) / 255.0
+
+			qr := int(fr/32) * 32
+			qg := int(fg/32) * 32
+			qb := int(fb/32) * 32
+			key := fmt.Sprintf("#%02x%02x%02x", qr, qg, qb)
+			colorCounts[key]++
+			count++
+		}
+	}
+
+	if count > 0 {
+		info.AvgBrightness = totalBright / float64(count)
+		info.DominantColor = fmt.Sprintf("#%02x%02x%02x",
+			int(totalR/float64(count)),
+			int(totalG/float64(count)),
+			int(totalB/float64(count)))
+	}
+
+	type colorEntry struct {
+		hex   string
+		count int
+	}
+	var entries []colorEntry
+	for k, v := range colorCounts {
+		entries = append(entries, colorEntry{k, v})
+	}
+	for i := 0; i < len(entries); i++ {
+		for j := i + 1; j < len(entries); j++ {
+			if entries[j].count > entries[i].count {
+				entries[i], entries[j] = entries[j], entries[i]
+			}
+		}
+	}
+	for i := 0; i < len(entries) && i < 5; i++ {
+		info.Palette = append(info.Palette, entries[i].hex)
+	}
+
+	return info, nil
 }
