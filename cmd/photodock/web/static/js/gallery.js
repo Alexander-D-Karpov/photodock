@@ -1,4 +1,91 @@
 (function() {
+    const GAP = 4;
+
+    function targetRowHeight() {
+        const w = window.innerWidth;
+        if (w <= 480) return 130;
+        if (w <= 768) return 170;
+        if (w <= 1100) return 210;
+        return 260;
+    }
+
+    function itemAspect(item) {
+        const el = item.querySelector('.progressive-image');
+        if (el && el.style.aspectRatio) {
+            const parts = el.style.aspectRatio.split('/');
+            const w = parseFloat(parts[0]);
+            const h = parseFloat(parts[1]);
+            if (w > 0 && h > 0) return w / h;
+        }
+        return 4 / 3;
+    }
+
+    function layoutJustified(orderedItems) {
+        const grid = document.getElementById('gallery');
+        if (!grid) return;
+
+        let items = orderedItems;
+        if (!items) {
+            items = Array.from(grid.querySelectorAll('.photo-item'));
+            if (items.length && items[0].dataset.idx !== undefined) {
+                items.sort((a, b) => (parseInt(a.dataset.idx) || 0) - (parseInt(b.dataset.idx) || 0));
+            }
+        }
+        if (!items.length) return;
+        items.forEach((item, i) => { item.dataset.idx = i; });
+
+        const trigger = grid.querySelector('.load-more-trigger');
+        const containerWidth = grid.clientWidth;
+        if (containerWidth <= 0) return;
+        const target = targetRowHeight();
+
+        let row = [];
+        let aspectSum = 0;
+        const rows = [];
+
+        items.forEach(item => {
+            const ar = itemAspect(item);
+            row.push({ item, ar });
+            aspectSum += ar;
+            const h = (containerWidth - GAP * (row.length - 1)) / aspectSum;
+            if (h <= target) {
+                rows.push({ row, height: h });
+                row = [];
+                aspectSum = 0;
+            }
+        });
+        if (row.length) {
+            const h = (containerWidth - GAP * (row.length - 1)) / aspectSum;
+            rows.push({ row, height: Math.min(h, target) });
+        }
+
+        grid.querySelectorAll('.justified-row').forEach(r => r.remove());
+
+        rows.forEach(r => {
+            const div = document.createElement('div');
+            div.className = 'justified-row';
+            r.row.forEach(({ item, ar }) => {
+                item.style.width = Math.floor(r.height * ar) + 'px';
+                item.style.height = Math.round(r.height) + 'px';
+                div.appendChild(item);
+            });
+            grid.appendChild(div);
+        });
+        if (trigger) grid.appendChild(trigger);
+    }
+
+    let resizeTimer = null;
+    let lastWidth = window.innerWidth;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            if (window.innerWidth !== lastWidth) {
+                lastWidth = window.innerWidth;
+                layoutJustified();
+            }
+        }, 120);
+    });
+
     function initLazyLoading() {
         document.querySelectorAll('.progressive-image').forEach(container => {
             const fullImage = container.querySelector('.full-image');
@@ -71,7 +158,7 @@
     }
 
     function init() {
-        layoutMasonry();
+        layoutJustified();
         initLazyLoading();
         initFolderLazyLoading();
     }
@@ -82,77 +169,7 @@
         init();
     }
 
-    function masonryColumnCount() {
-        const w = window.innerWidth;
-        if (w <= 768) return 2;
-        if (w <= 1100) return 3;
-        return 4;
-    }
-
-    function itemAspect(item) {
-        const el = item.querySelector('.progressive-image');
-        if (el && el.style.aspectRatio) {
-            const parts = el.style.aspectRatio.split('/');
-            const w = parseFloat(parts[0]);
-            const h = parseFloat(parts[1]);
-            if (w > 0 && h > 0) return w / h;
-        }
-        return 1;
-    }
-
-    function layoutMasonry(orderedItems) {
-        const grid = document.getElementById('gallery');
-        if (!grid) return;
-
-        let items = orderedItems;
-        if (!items) {
-            items = Array.from(grid.querySelectorAll('.photo-item'));
-            if (items.length && items[0].dataset.idx !== undefined) {
-                items.sort((a, b) => (parseInt(a.dataset.idx) || 0) - (parseInt(b.dataset.idx) || 0));
-            }
-        }
-        items.forEach((item, i) => { item.dataset.idx = i; });
-
-        const trigger = grid.querySelector('.load-more-trigger');
-        grid.querySelectorAll('.masonry-col').forEach(c => c.remove());
-
-        const colCount = masonryColumnCount();
-        const cols = [];
-        const heights = [];
-        for (let i = 0; i < colCount; i++) {
-            const col = document.createElement('div');
-            col.className = 'masonry-col';
-            cols.push(col);
-            heights.push(0);
-        }
-
-        items.forEach(item => {
-            let min = 0;
-            for (let i = 1; i < colCount; i++) {
-                if (heights[i] < heights[min]) min = i;
-            }
-            cols[min].appendChild(item);
-            heights[min] += 1 / itemAspect(item);
-        });
-
-        cols.forEach(c => grid.appendChild(c));
-        if (trigger) grid.appendChild(trigger);
-    }
-
-    let resizeTimer = null;
-    let lastColCount = masonryColumnCount();
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            const c = masonryColumnCount();
-            if (c !== lastColCount) {
-                lastColCount = c;
-                layoutMasonry();
-            }
-        }, 150);
-    });
-
-    window.layoutMasonry = layoutMasonry;
+    window.layoutJustified = layoutJustified;
     window.initGalleryLazyLoading = initLazyLoading;
     window.initFolderLazyLoading = initFolderLazyLoading;
 })();

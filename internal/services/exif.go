@@ -34,7 +34,7 @@ func (s *ExifService) Extract(path string) (*models.ExifInfo, time.Time, error) 
 }
 
 func (s *ExifService) extractWithExiftool(path string) (*models.ExifInfo, time.Time, error) {
-	cmd := exec.Command("exiftool", "-json", "-a", "-G1", "-n", path)
+	cmd := exec.Command("exiftool", "-json", "-a", "-G1", "-all", "-Orientation#", path)
 	output, err := cmd.Output()
 	if err != nil {
 		return s.extractWithGoexif(path)
@@ -60,111 +60,83 @@ func (s *ExifService) extractWithExiftool(path string) (*models.ExifInfo, time.T
 		info.LensModel = getString(data, "Composite:Lens")
 	}
 	info.LensInfo = getString(data, "ExifIFD:LensInfo")
-
-	if fl := getFloat(data, "ExifIFD:FocalLength"); fl > 0 {
-		info.FocalLength = fmt.Sprintf("%.1f mm", fl)
-	}
-	if fl35 := getFloat(data, "ExifIFD:FocalLengthIn35mmFormat"); fl35 > 0 {
-		info.FocalLength35mm = fmt.Sprintf("%.0f mm", fl35)
-	} else if fl35 := getFloat(data, "Composite:FocalLength35efl"); fl35 > 0 {
-		info.FocalLength35mm = fmt.Sprintf("%.1f mm", fl35)
+	if info.LensInfo == "" {
+		minFL := getString(data, "Canon:MinFocalLength")
+		maxFL := getString(data, "Canon:MaxFocalLength")
+		if minFL != "" && maxFL != "" {
+			info.LensInfo = minFL + " - " + maxFL
+		}
 	}
 
-	if minFL := getFloat(data, "Canon:MinFocalLength"); minFL > 0 {
-		maxFL := getFloat(data, "Canon:MaxFocalLength")
-		info.LensInfo = fmt.Sprintf("%.0f - %.0f mm", minFL, maxFL)
+	info.FocalLength = getString(data, "ExifIFD:FocalLength")
+	info.FocalLength35mm = getString(data, "ExifIFD:FocalLengthIn35mmFormat")
+	if info.FocalLength35mm == "" {
+		if efl := getString(data, "Composite:FocalLength35efl"); strings.Contains(efl, "equivalent: ") {
+			info.FocalLength35mm = strings.TrimSuffix(strings.SplitN(efl, "equivalent: ", 2)[1], ")")
+		}
 	}
 
 	if fn := getFloat(data, "ExifIFD:FNumber"); fn > 0 {
 		info.Aperture = fmt.Sprintf("f/%.1f", fn)
 	}
 	if maxAp := getFloat(data, "ExifIFD:MaxApertureValue"); maxAp > 0 {
-		fnum := math.Pow(2, maxAp/2)
-		info.MaxApertureValue = fmt.Sprintf("f/%.1f", fnum)
+		info.MaxApertureValue = fmt.Sprintf("f/%.1f", maxAp)
 	}
 
-	if et := getFloat(data, "ExifIFD:ExposureTime"); et > 0 {
-		if et >= 1 {
-			info.ShutterSpeed = fmt.Sprintf("%.1f s", et)
-		} else {
-			info.ShutterSpeed = fmt.Sprintf("1/%.0f s", 1/et)
-		}
+	if et := getString(data, "ExifIFD:ExposureTime"); et != "" {
+		info.ShutterSpeed = et + " s"
 	}
 
 	if iso := getInt(data, "ExifIFD:ISO"); iso > 0 {
 		info.ISO = iso
 	}
 
-	if ec := getFloat(data, "ExifIFD:ExposureCompensation"); ec != 0 {
-		if ec >= 0 {
-			info.ExposureComp = fmt.Sprintf("+%.1f EV", ec)
-		} else {
-			info.ExposureComp = fmt.Sprintf("%.1f EV", ec)
-		}
+	if ec := getString(data, "ExifIFD:ExposureCompensation"); ec != "" && ec != "0" {
+		info.ExposureComp = ec + " EV"
 	} else {
 		info.ExposureComp = "0 EV"
 	}
 
-	info.ExposureMode = decodeExposureModeValue(getInt(data, "ExifIFD:ExposureMode"))
-	info.ExposureProgram = decodeExposureProgram(getInt(data, "ExifIFD:ExposureProgram"))
-	info.MeteringMode = decodeMeteringMode(getInt(data, "ExifIFD:MeteringMode"))
+	info.ExposureMode = getString(data, "ExifIFD:ExposureMode")
+	info.ExposureProgram = getString(data, "ExifIFD:ExposureProgram")
+	info.MeteringMode = getString(data, "ExifIFD:MeteringMode")
 
 	if lv := getFloat(data, "Composite:LightValue"); lv != 0 {
 		info.LightValue = fmt.Sprintf("%.1f", lv)
 	}
 
-	flash := getInt(data, "ExifIFD:Flash")
-	info.Flash = decodeFlash(flash)
+	info.Flash = getString(data, "ExifIFD:Flash")
 	info.FlashMode = getString(data, "Canon:CanonFlashMode")
-	if fec := getFloat(data, "Canon:FlashExposureComp"); fec != 0 {
-		info.FlashExposureComp = fmt.Sprintf("%.1f EV", fec)
+	if fec := getString(data, "Canon:FlashExposureComp"); fec != "" && fec != "0" {
+		info.FlashExposureComp = fec + " EV"
 	}
 
-	wb := getInt(data, "ExifIFD:WhiteBalance")
-	if wb == 0 {
-		info.WhiteBalance = "Auto"
-	} else {
-		info.WhiteBalance = "Manual"
-	}
+	info.WhiteBalance = getString(data, "ExifIFD:WhiteBalance")
 	if ct := getInt(data, "Canon:ColorTemperature"); ct > 0 {
 		info.ColorTemperature = ct
 	}
-
-	info.ColorSpace = decodeColorSpace(getInt(data, "ExifIFD:ColorSpace"))
+	info.ColorSpace = getString(data, "ExifIFD:ColorSpace")
 
 	info.FocusMode = getString(data, "Canon:FocusMode")
-	if info.FocusMode == "" {
-		info.FocusMode = getString(data, "ExifIFD:FocusMode")
-	}
-
-	if fdUpper := getFloat(data, "Canon:FocusDistanceUpper"); fdUpper > 0 {
-		fdLower := getFloat(data, "Canon:FocusDistanceLower")
-		if fdLower > 0 && fdLower != fdUpper {
-			info.FocusDistance = fmt.Sprintf("%.2f - %.2f m", fdLower, fdUpper)
+	upper := getString(data, "Canon:FocusDistanceUpper")
+	lower := getString(data, "Canon:FocusDistanceLower")
+	if upper != "" {
+		if lower != "" && lower != upper && lower != "0 m" {
+			info.FocusDistance = lower + " - " + upper
 		} else {
-			info.FocusDistance = fmt.Sprintf("%.2f m", fdUpper)
+			info.FocusDistance = upper
 		}
 	}
-
-	if sd := getFloat(data, "ExifIFD:SubjectDistance"); sd > 0 {
-		if sd < 1 {
-			info.SubjectDistance = fmt.Sprintf("%.0f cm", sd*100)
-		} else {
-			info.SubjectDistance = fmt.Sprintf("%.2f m", sd)
-		}
-	}
-
+	info.SubjectDistance = getString(data, "ExifIFD:SubjectDistance")
+	info.SubjectDistRange = getString(data, "ExifIFD:SubjectDistanceRange")
 	info.DepthOfField = getString(data, "Composite:DOF")
 	info.HyperfocalDist = getString(data, "Composite:HyperfocalDistance")
 
-	info.Contrast = decodeCanonLevel(getString(data, "Canon:Contrast"))
-	info.Saturation = decodeCanonLevel(getString(data, "Canon:Saturation"))
+	info.Contrast = getString(data, "Canon:Contrast")
+	info.Saturation = getString(data, "Canon:Saturation")
 	info.Sharpness = getString(data, "Canon:Sharpness")
-	if info.Sharpness == "0" {
-		info.Sharpness = "Normal"
-	}
 
-	info.SceneCaptureType = decodeSceneCaptureType(getInt(data, "ExifIFD:SceneCaptureType"))
+	info.SceneCaptureType = getString(data, "ExifIFD:SceneCaptureType")
 	info.ShootingMode = getString(data, "Composite:ShootingMode")
 	if info.ShootingMode == "" {
 		info.ShootingMode = getString(data, "Canon:EasyMode")
@@ -177,27 +149,17 @@ func (s *ExifService) extractWithExiftool(path string) (*models.ExifInfo, time.T
 	info.SelfTimer = getString(data, "Canon:SelfTimer")
 	info.ImageStabilization = getString(data, "Canon:ImageStabilization")
 
-	dzr := getFloat(data, "ExifIFD:DigitalZoomRatio")
-	if dzr <= 1 {
+	info.DigitalZoom = getString(data, "ExifIFD:DigitalZoomRatio")
+	if info.DigitalZoom == "" || info.DigitalZoom == "1" {
 		info.DigitalZoom = "None"
-	} else {
-		info.DigitalZoom = fmt.Sprintf("%.1fx", dzr)
 	}
 
 	info.Quality = getString(data, "Canon:Quality")
 	info.Orientation = getInt(data, "IFD0:Orientation")
 
-	info.SensingMethod = decodeSensingMethod(getInt(data, "ExifIFD:SensingMethod"))
+	info.SensingMethod = getString(data, "ExifIFD:SensingMethod")
 	info.FileSource = getString(data, "ExifIFD:FileSource")
-	if info.FileSource == "3" {
-		info.FileSource = "Digital Camera"
-	}
-	cr := getInt(data, "ExifIFD:CustomRendered")
-	if cr == 0 {
-		info.CustomRendered = "Normal"
-	} else if cr == 1 {
-		info.CustomRendered = "Custom"
-	}
+	info.CustomRendered = getString(data, "ExifIFD:CustomRendered")
 
 	info.FirmwareVersion = getString(data, "Canon:FirmwareVersion")
 	if info.FirmwareVersion == "" {

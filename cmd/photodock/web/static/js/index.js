@@ -124,8 +124,8 @@
         if (photoGrid) {
             const photos = Array.from(photoGrid.querySelectorAll('.photo-item'));
             photos.sort((a, b) => compareItems(a, b, col, dir));
-            if (window.layoutMasonry) {
-                window.layoutMasonry(photos);
+            if (window.layoutJustified) {
+                window.layoutJustified(photos);
             } else {
                 photos.forEach(p => photoGrid.appendChild(p));
             }
