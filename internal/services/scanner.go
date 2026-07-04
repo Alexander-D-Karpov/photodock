@@ -238,26 +238,31 @@ func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
 }
 
 func (s *ScannerService) generateURLPath(ctx context.Context, filePath string) string {
-	urlPath := sanitizeURLPath(filePath)
+	base := strings.TrimSuffix(filePath, filepath.Ext(filePath))
+	urlPath := sanitizeURLPath(base)
 
-	var exists bool
-	_ = s.db.Pool().QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM photos WHERE url_path = $1)", urlPath).Scan(&exists)
-	if !exists {
+	taken := func(candidate string) bool {
+		var exists bool
+		_ = s.db.Pool().QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM photos WHERE url_path = $1)", candidate).Scan(&exists)
+		if exists {
+			return true
+		}
+		_ = s.db.Pool().QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM folders WHERE path = $1)", candidate).Scan(&exists)
+		return exists
+	}
+
+	if !taken(urlPath) {
 		return urlPath
 	}
 
-	ext := filepath.Ext(urlPath)
-	base := strings.TrimSuffix(urlPath, ext)
-
 	for i := 1; i < 100; i++ {
-		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
-		_ = s.db.Pool().QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM photos WHERE url_path = $1)", candidate).Scan(&exists)
-		if !exists {
+		candidate := fmt.Sprintf("%s-%d", urlPath, i)
+		if !taken(candidate) {
 			return candidate
 		}
 	}
 
-	return fmt.Sprintf("%s-%s%s", base, randHex(4), ext)
+	return fmt.Sprintf("%s-%s", urlPath, randHex(4))
 }
 
 func randHex(n int) string {

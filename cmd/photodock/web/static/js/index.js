@@ -6,6 +6,23 @@
     const savedView = localStorage.getItem('photodock-view') || 'grid';
     setView(savedView);
 
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+    function compareItems(a, b, col, dir) {
+        const aName = (a.dataset.name || '').toLowerCase();
+        const bName = (b.dataset.name || '').toLowerCase();
+        let r = 0;
+        if (col === 'name') {
+            r = collator.compare(aName, bName);
+        } else {
+            const aVal = parseInt(a.dataset[col]) || 0;
+            const bVal = parseInt(b.dataset[col]) || 0;
+            r = aVal - bVal;
+            if (r === 0) r = collator.compare(aName, bName);
+        }
+        return dir === 'asc' ? r : -r;
+    }
+
     viewBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const view = btn.dataset.view;
@@ -83,37 +100,9 @@
         rows.sort((a, b) => {
             const aIsFolder = a.classList.contains('folder-row');
             const bIsFolder = b.classList.contains('folder-row');
-
             if (aIsFolder && !bIsFolder) return -1;
             if (!aIsFolder && bIsFolder) return 1;
-
-            let aVal, bVal;
-
-            switch (col) {
-                case 'name':
-                    aVal = (a.dataset.name || '').toLowerCase();
-                    bVal = (b.dataset.name || '').toLowerCase();
-                    break;
-                case 'size':
-                    aVal = parseInt(a.dataset.size) || 0;
-                    bVal = parseInt(b.dataset.size) || 0;
-                    break;
-                case 'date':
-                    aVal = parseInt(a.dataset.date) || 0;
-                    bVal = parseInt(b.dataset.date) || 0;
-                    break;
-                default:
-                    return 0;
-            }
-
-            if (typeof aVal === 'string') {
-                if (aVal < bVal) return dir === 'asc' ? -1 : 1;
-                if (aVal > bVal) return dir === 'asc' ? 1 : -1;
-            } else {
-                if (dir === 'asc') return aVal - bVal;
-                return bVal - aVal;
-            }
-            return 0;
+            return compareItems(a, b, col, dir);
         });
 
         rows.forEach(row => tbody.appendChild(row));
@@ -128,62 +117,18 @@
 
         if (folderGrid) {
             const folders = Array.from(folderGrid.querySelectorAll('.folder-card'));
-            folders.sort((a, b) => {
-                let aVal, bVal;
-                switch (col) {
-                    case 'name':
-                        aVal = (a.dataset.name || '').toLowerCase();
-                        bVal = (b.dataset.name || '').toLowerCase();
-                        break;
-                    case 'date':
-                        aVal = parseInt(a.dataset.date) || 0;
-                        bVal = parseInt(b.dataset.date) || 0;
-                        break;
-                    default:
-                        return 0;
-                }
-                if (typeof aVal === 'string') {
-                    if (aVal < bVal) return dir === 'asc' ? -1 : 1;
-                    if (aVal > bVal) return dir === 'asc' ? 1 : -1;
-                } else {
-                    if (dir === 'asc') return aVal - bVal;
-                    return bVal - aVal;
-                }
-                return 0;
-            });
+            folders.sort((a, b) => compareItems(a, b, col === 'size' ? 'date' : col, dir));
             folders.forEach(f => folderGrid.appendChild(f));
         }
 
         if (photoGrid) {
             const photos = Array.from(photoGrid.querySelectorAll('.photo-item'));
-            photos.sort((a, b) => {
-                let aVal, bVal;
-                switch (col) {
-                    case 'name':
-                        aVal = (a.dataset.name || '').toLowerCase();
-                        bVal = (b.dataset.name || '').toLowerCase();
-                        break;
-                    case 'size':
-                        aVal = parseInt(a.dataset.size) || 0;
-                        bVal = parseInt(b.dataset.size) || 0;
-                        break;
-                    case 'date':
-                        aVal = parseInt(a.dataset.date) || 0;
-                        bVal = parseInt(b.dataset.date) || 0;
-                        break;
-                    default:
-                        return 0;
-                }
-                if (typeof aVal === 'string') {
-                    if (aVal < bVal) return dir === 'asc' ? -1 : 1;
-                    if (aVal > bVal) return dir === 'asc' ? 1 : -1;
-                } else {
-                    if (dir === 'asc') return aVal - bVal;
-                    return bVal - aVal;
-                }
-                return 0;
-            });
-            photos.forEach(p => photoGrid.appendChild(p));
+            photos.sort((a, b) => compareItems(a, b, col, dir));
+            if (window.layoutMasonry) {
+                window.layoutMasonry(photos);
+            } else {
+                photos.forEach(p => photoGrid.appendChild(p));
+            }
         }
     }
 

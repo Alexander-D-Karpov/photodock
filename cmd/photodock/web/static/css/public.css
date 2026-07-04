@@ -166,14 +166,22 @@ a:hover { text-decoration: underline; }
 
 /* Masonry using CSS columns */
 .masonry {
-    column-count: 4;
-    column-gap: 15px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: flex-start;
+}
+
+.masonry-col {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
 }
 
 .photo-item {
     display: block;
-    break-inside: avoid;
-    margin-bottom: 15px;
     text-decoration: none;
     color: inherit;
 }
@@ -251,7 +259,7 @@ a:hover { text-decoration: underline; }
     display: flex;
     align-items: center;
     justify-content: center;
-    column-span: all;
+    flex-basis: 100%;
 }
 
 .load-more-spinner {
@@ -272,17 +280,7 @@ a:hover { text-decoration: underline; }
     font-size: 0.9rem;
 }
 
-/* Responsive masonry columns */
-@media (max-width: 1400px) {
-    .masonry { column-count: 4; }
-}
-
-@media (max-width: 1100px) {
-    .masonry { column-count: 3; }
-}
-
 @media (max-width: 768px) {
-    .masonry { column-count: 2; }
     .folders-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
     .folder-card { max-width: none; }
     .folder-info { padding: 12px; min-height: 76px; }
@@ -290,8 +288,8 @@ a:hover { text-decoration: underline; }
 }
 
 @media (max-width: 480px) {
-    .masonry { column-count: 2; column-gap: 10px; }
-    .photo-item { margin-bottom: 10px; }
+    .masonry { gap: 10px; }
+    .masonry-col { gap: 10px; }
     .container { padding: 15px; }
     .header h1 { font-size: 1.5rem; }
 }

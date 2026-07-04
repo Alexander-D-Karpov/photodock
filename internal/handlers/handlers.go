@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"image"
+	"image/color"
 	"io"
 	"io/fs"
 	"log"
@@ -26,6 +28,7 @@ import (
 	"github.com/Alexander-D-Karpov/photodock/internal/database"
 	"github.com/Alexander-D-Karpov/photodock/internal/models"
 	"github.com/Alexander-D-Karpov/photodock/internal/services"
+	"github.com/disintegration/imaging"
 )
 
 type Handlers struct {
@@ -47,6 +50,13 @@ type ChunkedUpload struct {
 	TempDir   string
 	Chunks    map[int]bool
 	CreatedAt time.Time
+}
+
+func requestBaseURL(r *http.Request) string {
+	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") != "https" {
+		return "http://" + r.Host
+	}
+	return "https://" + r.Host
 }
 
 type IntPtrOrString struct {
@@ -159,6 +169,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /thumb/{size}/{id}", h.serveThumbnail)
 	mux.HandleFunc("GET /original/{id}", h.serveOriginal)
 	mux.HandleFunc("GET /placeholder/{id}", h.servePlaceholder)
+	mux.HandleFunc("GET /ogcard/folder/{id}", h.folderOGCard)
 
 	mux.HandleFunc("GET /admin", h.adminAuth(h.adminDashboard))
 	mux.HandleFunc("GET /admin/stats", h.adminAuth(h.adminStats))
@@ -372,6 +383,12 @@ func (h *Handlers) publicPath(w http.ResponseWriter, r *http.Request) {
 
 	photo, err := h.getPhotoByURLPath(r.Context(), cleaned)
 	if err != nil {
+		if ext := filepath.Ext(cleaned); isImageFile(cleaned) {
+			if p2, err2 := h.getPhotoByURLPath(r.Context(), strings.TrimSuffix(cleaned, ext)); err2 == nil {
+				http.Redirect(w, r, "/p/"+escapeURLPath(p2.URLPath), http.StatusMovedPermanently)
+				return
+			}
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -411,6 +428,7 @@ func (h *Handlers) renderFolder(w http.ResponseWriter, r *http.Request, folder *
 		"Breadcrumbs": breadcrumbs,
 		"ParentURL":   parentURL,
 		"Title":       folder.Name,
+		"BaseURL":     requestBaseURL(r),
 	})
 }
 
@@ -453,18 +471,16 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		folderURL = "/p/" + escapeURLPath(breadcrumbs[len(breadcrumbs)-1].Path) + "/"
 	}
 
-	baseURL := "https://" + r.Host
-	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") != "https" {
-		baseURL = "http://" + r.Host
-	}
+	baseURL := requestBaseURL(r)
 
-	previewWidth := 1920
+	previewWidth := 800
 	previewHeight := 0
 	if photo.Width > 0 && photo.Height > 0 {
-		previewHeight = int(float64(photo.Height) * (float64(previewWidth) / float64(photo.Width)))
 		if photo.Width < previewWidth {
 			previewWidth = photo.Width
 			previewHeight = photo.Height
+		} else {
+			previewHeight = photo.Height * previewWidth / photo.Width
 		}
 	}
 
@@ -1342,7 +1358,7 @@ func (h *Handlers) getFoldersWithCounts(ctx context.Context, where string) ([]mo
 				SELECT p.id FROM photos p WHERE p.folder_id = f.id AND p.hidden = false 
 				ORDER BY COALESCE(p.taken_at, p.created_at) DESC, p.id DESC LIMIT 4
 			)) as preview_ids
-		FROM folders f WHERE %s ORDER BY f.created_at DESC`, where)
+		FROM folders f WHERE %s ORDER BY lower(substring(f.name from '^\D*')), COALESCE(NULLIF(substring(f.name from '\d{1,18}'), '')::bigint, -1) DESC, lower(f.name)`, where)
 
 	rows, err := h.db.Pool().Query(ctx, query)
 	if err != nil {
@@ -2110,4 +2126,105 @@ func (h *Handlers) adminReprocess(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	h.jsonResponse(w, map[string]string{"status": "started"})
+}
+
+func (h *Handlers) folderOGCard(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimSuffix(r.PathValue("id"), ".jpg")
+	folderID, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	ctx := r.Context()
+	rows, err := h.db.Pool().Query(ctx,
+		`SELECT id, path FROM photos WHERE folder_id = $1 AND hidden = false
+		ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT 4`, folderID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	type ph struct {
+		id   int
+		path string
+	}
+	var photos []ph
+	var keyParts []string
+	for rows.Next() {
+		var p ph
+		if err := rows.Scan(&p.id, &p.path); err != nil {
+			continue
+		}
+		photos = append(photos, p)
+		keyParts = append(keyParts, strconv.Itoa(p.id))
+	}
+	rows.Close()
+
+	if len(photos) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+
+	cardDir := filepath.Join(h.cfg.CacheDir, "ogcard")
+	cardPath := filepath.Join(cardDir, fmt.Sprintf("folder_%d_%s.jpg", folderID, strings.Join(keyParts, "-")))
+
+	if _, err := os.Stat(cardPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(cardDir, 0755); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		const cw, chh, gap = 1200, 750, 4
+		half := (cw - gap) / 2
+		halfH := (chh - gap) / 2
+
+		var cells []image.Rectangle
+		switch len(photos) {
+		case 1:
+			cells = []image.Rectangle{image.Rect(0, 0, cw, chh)}
+		case 2:
+			cells = []image.Rectangle{
+				image.Rect(0, 0, half, chh),
+				image.Rect(half+gap, 0, cw, chh),
+			}
+		case 3:
+			cells = []image.Rectangle{
+				image.Rect(0, 0, half, chh),
+				image.Rect(half+gap, 0, cw, halfH),
+				image.Rect(half+gap, halfH+gap, cw, chh),
+			}
+		default:
+			cells = []image.Rectangle{
+				image.Rect(0, 0, half, halfH),
+				image.Rect(half+gap, 0, cw, halfH),
+				image.Rect(0, halfH+gap, half, chh),
+				image.Rect(half+gap, halfH+gap, cw, chh),
+			}
+		}
+
+		canvas := imaging.New(cw, chh, color.NRGBA{R: 18, G: 18, B: 18, A: 255})
+		for i, p := range photos {
+			thumbPath, err := h.thumbSvc.GetThumbnailPathByID(p.id, p.path, "medium")
+			if err != nil {
+				continue
+			}
+			img, err := imaging.Open(thumbPath)
+			if err != nil {
+				continue
+			}
+			c := cells[i]
+			filled := imaging.Fill(img, c.Dx(), c.Dy(), imaging.Center, imaging.Lanczos)
+			canvas = imaging.Paste(canvas, filled, c.Min)
+		}
+
+		if err := imaging.Save(canvas, cardPath, imaging.JPEGQuality(85)); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.ServeFile(w, r, cardPath)
 }
