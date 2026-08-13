@@ -8,6 +8,9 @@
 # Build output
 /bin/
 /dist/
+# Deploy binary built by `make deploy`
+/main
+.deploy.env
 
 # Test binary
 *.test

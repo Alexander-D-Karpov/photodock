@@ -1,0 +1,22 @@
+# PhotoDock server hygiene — install as /etc/logrotate.d/nginx (Task 4).
+# Arch ships nginx without a logrotate drop-in, so access.log/error.log grow
+# unbounded (they had reached 70GB / 5.7GB). This rotates them daily.
+#
+#   sudo cp deploy/logrotate-nginx /etc/logrotate.d/nginx
+#   sudo logrotate -f /etc/logrotate.d/nginx
+#   sudo systemctl enable --now logrotate.timer
+#   df -h /var/log
+
+/var/log/nginx/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 root root
+    sharedscripts
+    postrotate
+        systemctl kill -s USR1 nginx
+    endscript
+}

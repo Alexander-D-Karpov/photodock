@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +48,7 @@ type ChunkedUpload struct {
 	ID        string
 	Filename  string
 	Size      int64
+	Seq       int64
 	FolderID  *int
 	TempDir   string
 	Chunks    map[int]bool
@@ -63,8 +66,41 @@ type IntPtrOrString struct {
 	V *int
 }
 
-func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailService, scanSvc *services.ScannerService, webFS embed.FS) *Handlers {
-	funcMap := template.FuncMap{
+// staticAssetVersions hashes every embedded static file so templates can append
+// a content-derived ?v= query, letting nginx cache assets aggressively while
+// still busting the cache automatically whenever a file's bytes change.
+func staticAssetVersions(webFS fs.FS) map[string]string {
+	versions := make(map[string]string)
+	staticFS, err := fs.Sub(webFS, "web/static")
+	if err != nil {
+		return versions
+	}
+	_ = fs.WalkDir(staticFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		content, rerr := fs.ReadFile(staticFS, path)
+		if rerr != nil {
+			return nil
+		}
+		sum := sha256.Sum256(content)
+		versions["/static/"+path] = hex.EncodeToString(sum[:])[:8]
+		return nil
+	})
+	return versions
+}
+
+// templateFuncMap is the single source of truth for template helpers, shared by
+// LoadTemplates and its tests. assetVersions may be nil (asset then returns the
+// path unchanged).
+func templateFuncMap(assetVersions map[string]string) template.FuncMap {
+	return template.FuncMap{
+		"asset": func(p string) string {
+			if v, ok := assetVersions[p]; ok {
+				return p + "?v=" + v
+			}
+			return p
+		},
 		"json": func(v interface{}) template.JS {
 			b, _ := json.Marshal(v)
 			return template.JS(b)
@@ -93,23 +129,41 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 			return float64(a) / float64(b)
 		},
 	}
+}
 
-	tmplFS, _ := fs.Sub(webFS, "web/templates")
+// LoadTemplates parses every web/templates/*.html from the given FS with the
+// shared func map. Returning an error (rather than logging) lets tests assert
+// that the embedded templates all parse.
+func LoadTemplates(webFS fs.FS) (*template.Template, error) {
+	funcMap := templateFuncMap(staticAssetVersions(webFS))
+
+	tmplFS, err := fs.Sub(webFS, "web/templates")
+	if err != nil {
+		return nil, err
+	}
 	tmpl := template.New("").Funcs(funcMap)
 
-	err := fs.WalkDir(tmplFS, ".", func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(tmplFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".html") {
 			return err
 		}
-		content, err := fs.ReadFile(tmplFS, path)
-		if err != nil {
-			return err
+		content, rerr := fs.ReadFile(tmplFS, path)
+		if rerr != nil {
+			return rerr
 		}
-		_, err = tmpl.New(path).Parse(string(content))
-		return err
+		_, perr := tmpl.New(path).Parse(string(content))
+		return perr
 	})
 	if err != nil {
-		log.Printf("template walk error: %v", err)
+		return nil, err
+	}
+	return tmpl, nil
+}
+
+func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailService, scanSvc *services.ScannerService, webFS embed.FS) *Handlers {
+	tmpl, err := LoadTemplates(webFS)
+	if err != nil {
+		log.Printf("template load error: %v", err)
 	}
 
 	return &Handlers{
@@ -161,6 +215,7 @@ func (x *IntPtrOrString) UnmarshalJSON(b []byte) error {
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	staticFS, _ := fs.Sub(h.webFS, "web/static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	mux.HandleFunc("GET /favicon.ico", h.faviconICO)
 
 	mux.HandleFunc("GET /", h.publicIndex)
 	mux.HandleFunc("GET /folder/{id}", h.publicFolder)
@@ -196,6 +251,17 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/upload/chunk", h.adminAuth(h.adminUploadChunk))
 	mux.HandleFunc("POST /admin/upload/finalize", h.adminAuth(h.adminUploadFinalize))
 
+	mux.HandleFunc("GET /admin/staging", h.adminAuth(h.stagingList))
+	mux.HandleFunc("POST /admin/staging/file", h.adminAuth(h.stagingUploadSimple))
+	mux.HandleFunc("POST /admin/staging/init", h.adminAuth(h.stagingInit))
+	mux.HandleFunc("POST /admin/staging/chunk", h.adminAuth(h.adminUploadChunk))
+	mux.HandleFunc("POST /admin/staging/finalize", h.adminAuth(h.stagingFinalize))
+	mux.HandleFunc("POST /admin/staging/commit", h.adminAuth(h.stagingCommit))
+	mux.HandleFunc("GET /admin/staging/{id}/preview", h.adminAuth(h.stagingPreview))
+	mux.HandleFunc("GET /admin/staging/{id}/view", h.adminAuth(h.stagingView))
+	mux.HandleFunc("POST /admin/staging/{id}/rotate", h.adminAuth(h.stagingRotate))
+	mux.HandleFunc("DELETE /admin/staging/{id}", h.adminAuth(h.stagingDelete))
+
 	mux.HandleFunc("GET /api/folders", h.apiListFolders)
 	mux.HandleFunc("GET /api/folders/{id}", h.apiGetFolder)
 	mux.HandleFunc("GET /api/photos", h.apiListPhotos)
@@ -203,6 +269,20 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/random", h.apiRandomPhoto)
 	mux.HandleFunc("GET /random", h.publicRandomPhoto)
 	mux.HandleFunc("POST /admin/reprocess", h.adminAuth(h.adminReprocess))
+}
+
+// faviconICO serves the embedded site icon for browsers (and crawlers) that
+// request /favicon.ico, eliminating 404 log spam. The bytes are WebP; modern
+// browsers accept it, and templates also link the icon explicitly.
+func (h *Handlers) faviconICO(w http.ResponseWriter, r *http.Request) {
+	data, err := h.webFS.ReadFile("web/static/icon.webp")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/webp")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(data)
 }
 
 func (h *Handlers) adminAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -512,6 +592,16 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 	})
 }
 
+func contentDisposition(disp, filename string) string {
+	ascii := strings.Map(func(r rune) rune {
+		if r < 32 || r > 126 || r == '"' || r == '\\' || r == ';' {
+			return '_'
+		}
+		return r
+	}, filename)
+	return fmt.Sprintf("%s; filename=\"%s\"; filename*=UTF-8''%s", disp, ascii, url.PathEscape(filename))
+}
+
 func escapeURLPath(p string) string {
 	parts := strings.Split(p, "/")
 	for i := range parts {
@@ -530,12 +620,14 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var path string
-	if err := h.db.Pool().QueryRow(r.Context(), "SELECT path FROM photos WHERE id = $1", id).Scan(&path); err != nil {
+	var rotation int
+	if err := h.db.Pool().QueryRow(r.Context(),
+		"SELECT path, COALESCE(rotation, 0) FROM photos WHERE id = $1", id).Scan(&path, &rotation); err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	thumbPath, err := h.thumbSvc.GetThumbnailPathByID(id, path, size)
+	thumbPath, err := h.thumbSvc.GetThumbnailPathByID(id, path, size, rotation)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -549,11 +641,6 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("Content-Type", contentType)
 
-	if r.Header.Get("X-Real-IP") != "" {
-		w.Header().Set("X-Accel-Redirect", fmt.Sprintf("/internal/cache/%s/%d%s", size, id, filepath.Ext(thumbPath)))
-		return
-	}
-
 	http.ServeFile(w, r, thumbPath)
 }
 
@@ -561,24 +648,20 @@ func (h *Handlers) servePlaceholder(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
 
 	var blurhash string
-	if err := h.db.Pool().QueryRow(r.Context(), "SELECT COALESCE(blurhash, '') FROM photos WHERE id = $1", id).Scan(&blurhash); err != nil {
+	var width, height int
+	if err := h.db.Pool().QueryRow(r.Context(), "SELECT COALESCE(blurhash, ''), width, height FROM photos WHERE id = $1", id).Scan(&blurhash, &width, &height); err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	placeholderPath, err := h.thumbSvc.GetPlaceholderPathByID(id, blurhash)
+	placeholderPath, err := h.thumbSvc.GetPlaceholderPathByID(id, blurhash, width, height)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-
-	if r.Header.Get("X-Real-IP") != "" {
-		w.Header().Set("X-Accel-Redirect", fmt.Sprintf("/internal/cache/placeholder/%d.png", id))
-		w.Header().Set("Content-Type", "image/png")
-		return
-	}
+	w.Header().Set("Content-Type", "image/png")
 
 	http.ServeFile(w, r, placeholderPath)
 }
@@ -602,22 +685,57 @@ func (h *Handlers) adminDeletePhoto(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) serveOriginal(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
 
-	var path string
+	var path, filename string
+	var rotation int
 	var hidden bool
-	err := h.db.Pool().QueryRow(r.Context(), "SELECT path, hidden FROM photos WHERE id = $1", id).Scan(&path, &hidden)
+	err := h.db.Pool().QueryRow(r.Context(),
+		"SELECT path, filename, COALESCE(rotation, 0), hidden FROM photos WHERE id = $1", id).
+		Scan(&path, &filename, &rotation, &hidden)
 	if err != nil || hidden || !h.isPathSafe(path) {
 		http.NotFound(w, r)
 		return
 	}
+	if filename == "" {
+		filename = filepath.Base(path)
+	}
 
-	if r.Header.Get("X-Real-IP") != "" {
-		w.Header().Set("X-Accel-Redirect", "/internal/photos/"+path)
-		w.Header().Set("Content-Type", "image/jpeg")
-		if strings.HasSuffix(strings.ToLower(path), ".png") {
-			w.Header().Set("Content-Type", "image/png")
+	wantRaw := r.URL.Query().Get("raw") == "1"
+	download := r.URL.Query().Get("download") == "1"
+
+	if isRawExt(filename) && !wantRaw {
+		webPath, werr := h.thumbSvc.RawWebPath(filepath.Join(h.cfg.MediaRoot, path), rotation)
+		if werr != nil {
+			http.Error(w, werr.Error(), 500)
+			return
 		}
+		disp := "inline"
+		if download {
+			disp = "attachment"
+		}
+		jpgName := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Content-Disposition", contentDisposition(disp, jpgName))
+		w.Header().Set("Cache-Control", "public, max-age=31536000")
+		http.ServeFile(w, r, webPath)
 		return
 	}
+
+	contentType := "image/jpeg"
+	lower := strings.ToLower(path)
+	switch {
+	case strings.HasSuffix(lower, ".png"):
+		contentType = "image/png"
+	case strings.HasSuffix(lower, ".arw"):
+		contentType = "image/x-sony-arw"
+	}
+
+	disp := "inline"
+	if isRawExt(filename) || download {
+		disp = "attachment"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", contentDisposition(disp, filename))
 
 	w.Header().Set("Cache-Control", "public, max-age=31536000")
 	http.ServeFile(w, r, filepath.Join(h.cfg.MediaRoot, path))
@@ -919,7 +1037,10 @@ func (h *Handlers) adminScanFolder(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) adminClean(w http.ResponseWriter, r *http.Request) {
 	go func() {
-		_ = h.scanSvc.CleanOrphans(context.Background())
+		ctx := context.Background()
+		_ = h.scanSvc.CleanOrphans(ctx)
+		_ = h.scanSvc.DedupPhotos(ctx)
+		h.CleanupStaging(ctx)
 	}()
 	h.jsonResponse(w, map[string]string{"status": "started"})
 }
@@ -1354,11 +1475,12 @@ func (h *Handlers) getFoldersWithCounts(ctx context.Context, where string) ([]mo
 			(SELECT COUNT(*) FROM photos WHERE folder_id = f.id AND hidden = false) as photo_count,
 			(SELECT COUNT(*) FROM folders WHERE parent_id = f.id) as subfolder_count,
 			(SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE folder_id = f.id AND hidden = false) as total_size,
+			(SELECT MAX(COALESCE(p.taken_at, p.created_at)) FROM photos p WHERE p.folder_id = f.id AND p.hidden = false) as latest_photo_at,
 			(SELECT ARRAY(
-				SELECT p.id FROM photos p WHERE p.folder_id = f.id AND p.hidden = false 
+				SELECT p.id FROM photos p WHERE p.folder_id = f.id AND p.hidden = false
 				ORDER BY COALESCE(p.taken_at, p.created_at) DESC, p.id DESC LIMIT 4
 			)) as preview_ids
-		FROM folders f WHERE %s ORDER BY lower(substring(f.name from '^\D*')), COALESCE(NULLIF(substring(f.name from '\d{1,18}'), '')::bigint, -1) DESC, lower(f.name)`, where)
+		FROM folders f WHERE %s ORDER BY latest_photo_at DESC NULLS LAST, lower(f.name)`, where)
 
 	rows, err := h.db.Pool().Query(ctx, query)
 	if err != nil {
@@ -1371,7 +1493,7 @@ func (h *Handlers) getFoldersWithCounts(ctx context.Context, where string) ([]mo
 		var f models.Folder
 		var previewIDs []int64
 		if err := rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path, &f.CoverPhotoID, &f.CreatedAt,
-			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &previewIDs); err != nil {
+			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &f.LatestPhoto, &previewIDs); err != nil {
 			continue
 		}
 
@@ -1531,6 +1653,12 @@ func formatSize(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
+// dedupSuffixRe matches a browser/OS collision-dedup suffix appended right
+// before the extension, e.g. "DSC00170[1].jpg" (Windows/Chrome MTP copies) or
+// "photo (2).png". Only a purely-numeric bracketed run counts, so real names
+// like "final[edit].jpg" are left alone.
+var dedupSuffixRe = regexp.MustCompile(`[ _]*(\[\d+\]|\(\d+\))$`)
+
 func sanitizeFilename(name string) string {
 	name = filepath.Base(name)
 	name = strings.ReplaceAll(name, "..", "")
@@ -1540,6 +1668,12 @@ func sanitizeFilename(name string) string {
 		}
 		return r
 	}, name)
+	// Strip a trailing "[N]"/"(N)" dedup suffix (only if a real base name remains).
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	if stripped := dedupSuffixRe.ReplaceAllString(base, ""); stripped != "" {
+		name = stripped + ext
+	}
 	if name == "" || name == "." {
 		name = "unnamed"
 	}
@@ -1554,7 +1688,7 @@ func randString(n int) string {
 
 func isImageFile(name string) bool {
 	ext := strings.ToLower(filepath.Ext(name))
-	return ext == ".jpg" || ext == ".jpeg" || ext == ".png"
+	return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".arw"
 }
 
 func (h *Handlers) apiListFolders(w http.ResponseWriter, r *http.Request) {
@@ -1565,11 +1699,10 @@ func (h *Handlers) apiListFolders(w http.ResponseWriter, r *http.Request) {
 	var where string
 	var args []interface{}
 
-	if parentIDStr == "" {
+	switch parentIDStr {
+	case "", "root":
 		where = "parent_id IS NULL"
-	} else if parentIDStr == "root" {
-		where = "parent_id IS NULL"
-	} else {
+	default:
 		pid, err := strconv.Atoi(parentIDStr)
 		if err != nil {
 			http.Error(w, "invalid parent_id", 400)
@@ -2138,7 +2271,7 @@ func (h *Handlers) folderOGCard(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	rows, err := h.db.Pool().Query(ctx,
-		`SELECT id, path FROM photos WHERE folder_id = $1 AND hidden = false
+		`SELECT id, path, COALESCE(rotation, 0) FROM photos WHERE folder_id = $1 AND hidden = false
 		ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT 4`, folderID)
 	if err != nil {
 		http.NotFound(w, r)
@@ -2146,14 +2279,15 @@ func (h *Handlers) folderOGCard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type ph struct {
-		id   int
-		path string
+		id       int
+		path     string
+		rotation int
 	}
 	var photos []ph
 	var keyParts []string
 	for rows.Next() {
 		var p ph
-		if err := rows.Scan(&p.id, &p.path); err != nil {
+		if err := rows.Scan(&p.id, &p.path, &p.rotation); err != nil {
 			continue
 		}
 		photos = append(photos, p)
@@ -2205,7 +2339,7 @@ func (h *Handlers) folderOGCard(w http.ResponseWriter, r *http.Request) {
 
 		canvas := imaging.New(cw, chh, color.NRGBA{R: 18, G: 18, B: 18, A: 255})
 		for i, p := range photos {
-			thumbPath, err := h.thumbSvc.GetThumbnailPathByID(p.id, p.path, "medium")
+			thumbPath, err := h.thumbSvc.GetThumbnailPathByID(p.id, p.path, "medium", p.rotation)
 			if err != nil {
 				continue
 			}

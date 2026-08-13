@@ -3,9 +3,23 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script>document.documentElement.className+=' js';setTimeout(function(){var g=document.getElementById('gallery');if(g)g.classList.add('jl-ready');},4000);</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
-    <link rel="stylesheet" href="/static/css/public.css">
+    <link rel="stylesheet" href="{{asset "/static/css/public.css"}}">
+    <link rel="icon" type="image/webp" href="{{asset "/static/icon.webp"}}">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="{{.Title}} - PhotoDock">
+    <meta property="og:description" content="{{len .Photos}} photos">
+    <meta property="og:url" content="{{.BaseURL}}/p/{{urlpath .Folder.Path}}/">
+    <meta property="og:image" content="{{.BaseURL}}/ogcard/folder/{{.Folder.ID}}.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="750">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{.Title}} - PhotoDock">
+    <meta name="twitter:image" content="{{.BaseURL}}/ogcard/folder/{{.Folder.ID}}.jpg">
 </head>
 <body class="index-page">
 <div class="index-container">
@@ -59,14 +73,14 @@
                 <td class="col-date">-</td>
             </tr>
             {{range .Subfolders}}
-            <tr class="folder-row" data-name="{{.Name}}" data-size="{{.TotalSize}}" data-date="{{.CreatedAt.Unix}}">
+            <tr class="folder-row" data-name="{{.Name}}" data-size="{{.TotalSize}}" data-date="{{if .LatestPhoto.Valid}}{{.LatestPhoto.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
                 <td class="col-icon">{{template "icon-folder-small"}}</td>
                 <td class="col-name">
                     <a href="/p/{{urlpath .Path}}/">{{.Name}}/</a>
                     <span class="item-meta">{{.PhotoCount}} photos{{if .SubfolderCount}}, {{.SubfolderCount}} folders{{end}}</span>
                 </td>
                 <td class="col-size">{{if gt .TotalSize 0}}{{formatSize .TotalSize}}{{else}}-{{end}}</td>
-                <td class="col-date">{{formatDate .CreatedAt}}</td>
+                <td class="col-date">{{if .LatestPhoto.Valid}}{{formatDate .LatestPhoto.Time}}{{else}}{{formatDate .CreatedAt}}{{end}}</td>
             </tr>
             {{end}}
             {{range .Photos}}
@@ -91,7 +105,7 @@
                 <h2>Folders</h2>
                 <div class="folders-grid">
                     {{range .Subfolders}}
-                    <a href="/p/{{urlpath .Path}}/" class="folder-card" data-name="{{.Name}}" data-date="{{.CreatedAt.Unix}}">
+                    <a href="/p/{{urlpath .Path}}/" class="folder-card" data-name="{{.Name}}" data-date="{{if .LatestPhoto.Valid}}{{.LatestPhoto.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
                         <div class="folder-cover {{if not .PreviewURLs}}empty{{else if eq (len .PreviewURLs) 1}}count-1{{else if eq (len .PreviewURLs) 2}}count-2{{else if eq (len .PreviewURLs) 3}}count-3{{else}}count-4{{end}}">
                             {{if .PreviewURLs}}
                             {{range .PreviewURLs}}
@@ -126,6 +140,7 @@
                             {{end}}
                             <img class="full-image"
                                  src="/thumb/small/{{.ID}}"
+                                 data-medium="/thumb/medium/{{.ID}}"
                                  alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}"
                                  loading="lazy">
                         </div>
@@ -143,8 +158,8 @@
         <span><a href="https://github.com/Alexander-D-Karpov/photodock" target="_blank" rel="noopener">GitHub</a></span>
     </footer>
 </div>
-<script src="/static/js/gallery.js"></script>
-<script src="/static/js/index.js"></script>
+<script src="{{asset "/static/js/gallery.js"}}"></script>
+<script src="{{asset "/static/js/index.js"}}"></script>
 </body>
 </html>
 {{end}}

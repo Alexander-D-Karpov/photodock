@@ -59,9 +59,8 @@ a:hover { text-decoration: underline; }
 
 .folders-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 320px));
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 24px;
-    justify-content: start;
     align-items: start;
 }
 
@@ -77,7 +76,6 @@ a:hover { text-decoration: underline; }
     box-shadow: var(--shadow);
     transition: transform 0.2s, box-shadow 0.2s;
     width: 100%;
-    max-width: 320px;
 }
 
 .folder-card:hover {
@@ -164,13 +162,21 @@ a:hover { text-decoration: underline; }
     color: var(--text-secondary);
 }
 
-/* Masonry using CSS columns */
+/* Justified rows: gallery.js wraps .photo-item anchors into .justified-row
+   flex rows; this flex-wrap container is the pre-JS fallback. */
 .masonry {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
     align-items: flex-start;
 }
+
+/* Avoid the fallback->justified reflow flash on slow connections: when JS is
+   active (html.js, set by an inline head script), keep the grid invisible until
+   gallery.js applies the justified layout and marks it ready. No-JS users never
+   get html.js, so they still see the CSS masonry fallback. A head-script
+   timeout adds .jl-ready as a failsafe if gallery.js never loads. */
+html.js #gallery:not(.jl-ready) { visibility: hidden; }
 
 .masonry > .photo-item {
     flex: 1 1 260px;
@@ -228,7 +234,7 @@ a:hover { text-decoration: underline; }
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: fill;
     filter: blur(20px);
     transform: scale(1.1);
     transition: opacity 0.3s ease-out;
@@ -408,9 +414,13 @@ a:hover { text-decoration: underline; }
     transform-origin: center center;
 }
 
+/* When zoomed, the JS transform:scale() does all the scaling. The image's
+   layout box MUST stay at its fit-to-screen size (max-width/max-height from
+   the base rule) — the pan/zoom math is computed against that box. Overriding
+   the box to natural size here jumps it mid-zoom and breaks the math (image
+   appears mis-sized/mispositioned the instant you zoom). Only the cursor
+   changes; the scaling is transform-only. */
 .viewer-image img.zoomed {
-    max-width: none;
-    max-height: none;
     cursor: grab;
 }
 
@@ -633,8 +643,7 @@ a.nav-btn:hover {
 .index-page { background: var(--bg); }
 
 .index-container {
-    max-width: 1400px;
-    margin: 0 auto;
+    width: 100%;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -820,7 +829,32 @@ a.nav-btn:hover {
 }
 
 @media (max-width: 768px) {
-    .viewer-header { padding: 10px 15px; }
+    .viewer-header {
+        height: auto;
+        min-height: 52px;
+        padding: 8px 10px;
+        gap: 8px;
+    }
+    .viewer-header .breadcrumbs {
+        flex-wrap: nowrap;
+        overflow: hidden;
+        gap: 4px;
+    }
+    .viewer-header .breadcrumbs a,
+    .viewer-header .breadcrumbs span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+    }
+    .viewer-header .breadcrumbs a { flex-shrink: 1; }
+    .viewer-header .breadcrumbs span:last-child { flex: 0 1 auto; }
+    .viewer-header-left { min-width: 0; overflow: hidden; }
+    .header-nav-btn { display: none; }
+    .photo-counter { display: none; }
+    .viewer-header-right { gap: 2px; }
+    .viewer-header-right .btn-icon { padding: 7px; }
+    .viewer-image img { max-height: calc(100vh - 72px); }
     .nav-btn { width: 50px; }
     .nav-btn svg { width: 24px; height: 24px; }
     .file-list .col-date { display: none; }

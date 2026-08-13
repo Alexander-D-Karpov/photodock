@@ -61,6 +61,22 @@ func (db *DB) Migrate() error {
 		data JSONB NOT NULL,
 		updated_at TIMESTAMPTZ DEFAULT NOW()
 	);
+
+	CREATE TABLE IF NOT EXISTS staged_uploads (
+		id TEXT PRIMARY KEY,
+		seq BIGINT NOT NULL DEFAULT 0,
+		filename TEXT NOT NULL,
+		size_bytes BIGINT NOT NULL DEFAULT 0,
+		width INTEGER NOT NULL DEFAULT 0,
+		height INTEGER NOT NULL DEFAULT 0,
+		is_raw BOOLEAN NOT NULL DEFAULT FALSE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_staged_seq ON staged_uploads(seq);
+
+	ALTER TABLE staged_uploads ADD COLUMN IF NOT EXISTS rotation INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE photos ADD COLUMN IF NOT EXISTS rotation INTEGER NOT NULL DEFAULT 0;
 	`
 	_, err := db.pool.Exec(context.Background(), schema)
 	return err

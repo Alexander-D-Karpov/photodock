@@ -3,10 +3,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script>document.documentElement.className+=' js';setTimeout(function(){var g=document.getElementById('gallery');if(g)g.classList.add('jl-ready');},4000);</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
     <meta name="description" content="Self-hosted photo gallery with automatic organization and EXIF extraction">
-    <link rel="stylesheet" href="/static/css/public.css">
+    <link rel="stylesheet" href="{{asset "/static/css/public.css"}}">
+    <link rel="icon" type="image/webp" href="{{asset "/static/icon.webp"}}">
 </head>
 <body class="index-page">
 <div class="index-container">
@@ -46,14 +48,14 @@
             </thead>
             <tbody>
             {{range .Folders}}
-            <tr class="folder-row" data-name="{{.Name}}" data-size="{{.TotalSize}}" data-date="{{.CreatedAt.Unix}}">
+            <tr class="folder-row" data-name="{{.Name}}" data-size="{{.TotalSize}}" data-date="{{if .LatestPhoto.Valid}}{{.LatestPhoto.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
                 <td class="col-icon">{{template "icon-folder-small"}}</td>
                 <td class="col-name">
                     <a href="/p/{{urlpath .Path}}/">{{.Name}}/</a>
                     <span class="item-meta">{{.PhotoCount}} photos{{if .SubfolderCount}}, {{.SubfolderCount}} folders{{end}}</span>
                 </td>
                 <td class="col-size">{{if gt .TotalSize 0}}{{formatSize .TotalSize}}{{else}}-{{end}}</td>
-                <td class="col-date">{{formatDate .CreatedAt}}</td>
+                <td class="col-date">{{if .LatestPhoto.Valid}}{{formatDate .LatestPhoto.Time}}{{else}}{{formatDate .CreatedAt}}{{end}}</td>
             </tr>
             {{end}}
             {{range .Photos}}
@@ -78,7 +80,7 @@
                 <h2>Folders</h2>
                 <div class="folders-grid">
                     {{range .Folders}}
-                    <a href="/p/{{urlpath .Path}}/" class="folder-card" data-name="{{.Name}}" data-date="{{.CreatedAt.Unix}}">
+                    <a href="/p/{{urlpath .Path}}/" class="folder-card" data-name="{{.Name}}" data-date="{{if .LatestPhoto.Valid}}{{.LatestPhoto.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
                         <div class="folder-cover {{if not .PreviewURLs}}empty{{else if eq (len .PreviewURLs) 1}}count-1{{else if eq (len .PreviewURLs) 2}}count-2{{else if eq (len .PreviewURLs) 3}}count-3{{else}}count-4{{end}}">
                             {{if .PreviewURLs}}
                             {{range .PreviewURLs}}
@@ -113,6 +115,7 @@
                             {{end}}
                             <img class="full-image"
                                  src="/thumb/small/{{.ID}}"
+                                 data-medium="/thumb/medium/{{.ID}}"
                                  alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}"
                                  loading="lazy">
                         </div>
@@ -137,8 +140,8 @@
         <span><a href="https://github.com/Alexander-D-Karpov/photodock" target="_blank" rel="noopener">GitHub</a></span>
     </footer>
 </div>
-<script src="/static/js/gallery.js"></script>
-<script src="/static/js/index.js"></script>
+<script src="{{asset "/static/js/gallery.js"}}"></script>
+<script src="{{asset "/static/js/index.js"}}"></script>
 </body>
 </html>
 {{end}}

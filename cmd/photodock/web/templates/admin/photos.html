@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
-    <link rel="stylesheet" href="/static/css/admin.css">
+    <link rel="stylesheet" href="{{asset "/static/css/admin.css"}}">
+    <link rel="icon" type="image/webp" href="{{asset "/static/icon.webp"}}">
 </head>
 <body>
 <div class="admin-container">
@@ -104,7 +105,7 @@
         </div>
     </dialog>
 </div>
-<script src="/static/js/admin.js"></script>
+<script src="{{asset "/static/js/admin.js"}}"></script>
 </body>
 </html>
 {{end}}

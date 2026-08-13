@@ -7,6 +7,7 @@ import (
 	"image/color"
 	_ "image/jpeg"
 	"image/png"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,13 @@ import (
 	"github.com/Alexander-D-Karpov/photodock/internal/models"
 	"github.com/disintegration/imaging"
 )
+
+const (
+	stagingPreviewWidth = 400
+	stagingViewWidth    = 2560
+)
+
+var thumbSizes = []string{"small", "medium", "large"}
 
 type ThumbnailService struct {
 	mediaRoot   string
@@ -27,13 +35,51 @@ func NewThumbnailService(mediaRoot, cacheDir string) *ThumbnailService {
 	_ = os.MkdirAll(filepath.Join(cacheDir, "medium"), 0755)
 	_ = os.MkdirAll(filepath.Join(cacheDir, "large"), 0755)
 	_ = os.MkdirAll(filepath.Join(cacheDir, "placeholder"), 0755)
+	_ = os.MkdirAll(filepath.Join(cacheDir, "raw"), 0755)
+	_ = os.MkdirAll(filepath.Join(cacheDir, "rawdev"), 0755)
+	rawDevelopers()
 	return &ThumbnailService{
 		mediaRoot: mediaRoot,
 		cacheDir:  cacheDir,
 	}
 }
 
-func (s *ThumbnailService) GetThumbnailPathByID(photoID int, photoPath, size string) (string, error) {
+func NormalizeRotation(rotation int) int {
+	r := rotation % 360
+	if r < 0 {
+		r += 360
+	}
+	return (r / 90) * 90
+}
+
+// Rotation is stored clockwise; imaging.Rotate90 turns counter-clockwise.
+func applyRotation(img image.Image, rotation int) image.Image {
+	switch NormalizeRotation(rotation) {
+	case 90:
+		return imaging.Rotate270(img)
+	case 180:
+		return imaging.Rotate180(img)
+	case 270:
+		return imaging.Rotate90(img)
+	}
+	return img
+}
+
+func RotatedDimensions(width, height, rotation int) (int, int) {
+	if r := NormalizeRotation(rotation); r == 90 || r == 270 {
+		return height, width
+	}
+	return width, height
+}
+
+func resizeToWidth(img image.Image, width int) image.Image {
+	if width <= 0 || img.Bounds().Dx() <= width {
+		return img
+	}
+	return imaging.Resize(img, width, 0, imaging.Lanczos)
+}
+
+func (s *ThumbnailService) GetThumbnailPathByID(photoID int, photoPath, size string, rotation int) (string, error) {
 	ext := ".jpg"
 	if strings.HasSuffix(strings.ToLower(photoPath), ".png") {
 		ext = ".png"
@@ -50,7 +96,7 @@ func (s *ThumbnailService) GetThumbnailPathByID(photoID int, photoPath, size str
 	}
 
 	srcPath := filepath.Join(s.mediaRoot, photoPath)
-	if err := s.generateThumbnail(srcPath, thumbPath, size); err != nil {
+	if err := s.generateThumbnail(srcPath, thumbPath, size, rotation); err != nil {
 		return "", err
 	}
 
@@ -58,11 +104,29 @@ func (s *ThumbnailService) GetThumbnailPathByID(photoID int, photoPath, size str
 	return thumbPath, nil
 }
 
-func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string) error {
-	img, err := imaging.Open(srcPath, imaging.AutoOrientation(true))
+// RebuildDerivatives drops every cached rendering of a photo and regenerates it
+// from the current source and rotation. Thumbnails are keyed by photo ID alone,
+// so anything that changes how a photo renders (a rotation edit, a new RAW
+// decoder, a render-pipeline change) must go through here or the cached
+// thumbnails silently disagree with photos.width/height and with /original/.
+func (s *ThumbnailService) RebuildDerivatives(photoID int, photoPath, blurhash string, rotation, width, height int) {
+	_ = s.DeleteThumbnailsByID(photoID)
+	for _, size := range thumbSizes {
+		if _, err := s.GetThumbnailPathByID(photoID, photoPath, size, rotation); err != nil {
+			log.Printf("thumbnail %s for photo %d (%s): %v", size, photoID, photoPath, err)
+		}
+	}
+	if _, err := s.GetPlaceholderPathByID(photoID, blurhash, width, height); err != nil {
+		log.Printf("placeholder for photo %d (%s): %v", photoID, photoPath, err)
+	}
+}
+
+func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string, rotation int) error {
+	img, err := s.openImage(srcPath)
 	if err != nil {
 		return err
 	}
+	img = applyRotation(img, rotation)
 
 	var width int
 	var quality int
@@ -71,17 +135,17 @@ func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string) erro
 		width = 300
 		quality = 80
 	case "medium":
-		width = 800
-		quality = 85
+		width = 1000
+		quality = 86
 	case "large":
-		width = 1440
-		quality = 85
+		width = 2560
+		quality = 90
 	default:
 		width = 300
 		quality = 80
 	}
 
-	thumb := imaging.Resize(img, width, 0, imaging.Lanczos)
+	thumb := resizeToWidth(img, width)
 
 	if strings.HasSuffix(strings.ToLower(dstPath), ".png") {
 		return imaging.Save(thumb, dstPath)
@@ -89,12 +153,33 @@ func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string) erro
 	return imaging.Save(thumb, dstPath, imaging.JPEGQuality(quality))
 }
 
-func (s *ThumbnailService) GenerateBlurhash(photoPath string) (string, error) {
-	srcPath := filepath.Join(s.mediaRoot, photoPath)
-	img, err := imaging.Open(srcPath, imaging.AutoOrientation(true))
+func (s *ThumbnailService) MakeStagingPreviews(srcPath, dir string, rotation int) (int, int, error) {
+	img, err := s.openImage(srcPath)
+	if err != nil {
+		return 0, 0, err
+	}
+	img = applyRotation(img, rotation)
+	b := img.Bounds()
+
+	view := resizeToWidth(img, stagingViewWidth)
+	if err := imaging.Save(view, filepath.Join(dir, "view.jpg"), imaging.JPEGQuality(92)); err != nil {
+		return 0, 0, err
+	}
+
+	thumb := resizeToWidth(img, stagingPreviewWidth)
+	if err := imaging.Save(thumb, filepath.Join(dir, "preview.jpg"), imaging.JPEGQuality(82)); err != nil {
+		return 0, 0, err
+	}
+
+	return b.Dx(), b.Dy(), nil
+}
+
+func (s *ThumbnailService) GenerateBlurhash(photoPath string, rotation int) (string, error) {
+	img, err := s.openImage(filepath.Join(s.mediaRoot, photoPath))
 	if err != nil {
 		return "", err
 	}
+	img = applyRotation(img, rotation)
 
 	tiny := imaging.Resize(img, 4, 4, imaging.Box)
 	bounds := tiny.Bounds()
@@ -110,20 +195,14 @@ func (s *ThumbnailService) GenerateBlurhash(photoPath string) (string, error) {
 	return base64.StdEncoding.EncodeToString(pixels), nil
 }
 
-func (s *ThumbnailService) GetImageDimensions(photoPath string) (int, int, error) {
-	srcPath := filepath.Join(s.mediaRoot, photoPath)
-	f, err := os.Open(srcPath)
+func (s *ThumbnailService) GetImageDimensions(photoPath string, rotation int) (int, int, error) {
+	img, err := s.openImage(filepath.Join(s.mediaRoot, photoPath))
 	if err != nil {
 		return 0, 0, err
 	}
-	defer func() { _ = f.Close() }()
-
-	config, _, err := image.DecodeConfig(f)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	return config.Width, config.Height, nil
+	b := img.Bounds()
+	w, h := RotatedDimensions(b.Dx(), b.Dy(), rotation)
+	return w, h, nil
 }
 
 func (s *ThumbnailService) GeneratePlaceholder(blurhash string, width, height int) (image.Image, error) {
@@ -150,7 +229,30 @@ func (s *ThumbnailService) GeneratePlaceholder(blurhash string, width, height in
 	return imaging.Resize(tiny, width, height, imaging.Linear), nil
 }
 
-func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string) (string, error) {
+// placeholderDims scales a photo's dimensions down to a tiny box (longest side
+// ~64px) preserving aspect ratio, so the placeholder PNG matches the photo's
+// shape instead of being a square that gets stretched in the grid. Unknown
+// dims fall back to a square.
+func placeholderDims(width, height int) (int, int) {
+	const maxSide = 64
+	if width <= 0 || height <= 0 {
+		return 32, 32
+	}
+	if width >= height {
+		h := (height*maxSide + width/2) / width
+		if h < 1 {
+			h = 1
+		}
+		return maxSide, h
+	}
+	w := (width*maxSide + height/2) / height
+	if w < 1 {
+		w = 1
+	}
+	return w, maxSide
+}
+
+func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string, width, height int) (string, error) {
 	placeholderPath := filepath.Join(s.cacheDir, "placeholder", fmt.Sprintf("%d.png", photoID))
 
 	if _, ok := s.existsCache.Load(placeholderPath); ok {
@@ -162,7 +264,8 @@ func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string) 
 		return placeholderPath, nil
 	}
 
-	img, err := s.GeneratePlaceholder(blurhash, 32, 32)
+	pw, ph := placeholderDims(width, height)
+	img, err := s.GeneratePlaceholder(blurhash, pw, ph)
 	if err != nil {
 		return "", err
 	}
@@ -212,8 +315,7 @@ func (s *ThumbnailService) CacheDir() string {
 }
 
 func (s *ThumbnailService) AnalyzeColors(photoPath string) (*models.ColorInfo, error) {
-	srcPath := filepath.Join(s.mediaRoot, photoPath)
-	img, err := imaging.Open(srcPath, imaging.AutoOrientation(true))
+	img, err := s.openImage(filepath.Join(s.mediaRoot, photoPath))
 	if err != nil {
 		return nil, err
 	}

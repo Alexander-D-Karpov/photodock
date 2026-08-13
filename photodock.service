@@ -11,6 +11,9 @@ ExecStart=/opt/photodock/photodock
 Restart=always
 RestartSec=5
 EnvironmentFile=/opt/photodock/.env
+# exiftool ships in Arch's vendor_perl dir, which is not on the default systemd
+# PATH; include it so NewExifService's LookPath("exiftool") succeeds at startup.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/bin/vendor_perl
 
 [Install]
 WantedBy=multi-user.target

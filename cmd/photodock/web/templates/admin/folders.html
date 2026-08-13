@@ -5,19 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
-    <link rel="stylesheet" href="/static/css/admin.css">
-
-    <meta property="og:type" content="website">
-    <meta property="og:title" content="{{.Title}} - PhotoDock">
-    <meta property="og:description" content="{{len .Photos}} photos">
-    <meta property="og:url" content="{{.BaseURL}}/p/{{urlpath .Folder.Path}}/">
-    <meta property="og:image" content="{{.BaseURL}}/ogcard/folder/{{.Folder.ID}}.jpg">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="750">
-    <meta property="og:image:type" content="image/jpeg">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="{{.Title}} - PhotoDock">
-    <meta name="twitter:image" content="{{.BaseURL}}/ogcard/folder/{{.Folder.ID}}.jpg">
+    <link rel="stylesheet" href="{{asset "/static/css/admin.css"}}">
+    <link rel="icon" type="image/webp" href="{{asset "/static/icon.webp"}}">
 </head>
 <body>
 <div class="admin-container">
@@ -102,7 +91,7 @@
         </form>
     </dialog>
 </div>
-<script src="/static/js/admin.js"></script>
+<script src="{{asset "/static/js/admin.js"}}"></script>
 </body>
 </html>
 {{end}}

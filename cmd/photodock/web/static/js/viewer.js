@@ -64,7 +64,7 @@ function initViewer(opts) {
     img.style.userSelect = 'none';
     img.style.webkitUserDrag = 'none';
     img.style.willChange = 'transform';
-    img.style.transformOrigin = 'center center';
+    img.style.transformOrigin = '0 0';
 
     // Mobile: stop browser’s native pan/zoom from stealing gestures
     container.style.touchAction = 'none';
@@ -84,71 +84,54 @@ function initViewer(opts) {
         return container.getBoundingClientRect();
     }
 
-    // Layout (untransformed) size of the displayed image (NOT affected by CSS transforms)
-    function getBaseSize() {
-        const w = img.offsetWidth || img.getBoundingClientRect().width || 1;
-        const h = img.offsetHeight || img.getBoundingClientRect().height || 1;
-        return { baseWidth: w, baseHeight: h };
+    let base = { left: 0, top: 0, width: 1, height: 1 };
+
+    function measureBase() {
+        const prevTransition = img.style.transition;
+        const prevTransform = img.style.transform;
+        img.style.transition = 'none';
+        img.style.transform = 'none';
+        const r = img.getBoundingClientRect();
+        base = { left: r.left, top: r.top, width: r.width || 1, height: r.height || 1 };
+        img.style.transform = prevTransform;
+        img.style.transition = prevTransition;
     }
 
     function getMaxZoom() {
-        const { baseWidth, baseHeight } = getBaseSize();
-        const natW = img.naturalWidth || baseWidth || 1;
-        const natH = img.naturalHeight || baseHeight || 1;
-
-        const zx = natW / (baseWidth || 1);
-        const zy = natH / (baseHeight || 1);
-
-        // At least 4x, but allow up to 1:1 pixels or more when image was scaled down to fit
+        const natW = img.naturalWidth || base.width || 1;
+        const natH = img.naturalHeight || base.height || 1;
+        const zx = natW / (base.width || 1);
+        const zy = natH / (base.height || 1);
         return Math.max(4, zx, zy);
     }
 
+    function clampAxis(t, baseStart, baseSize, cStart, cSize, scale) {
+        const scaled = baseSize * scale;
+        if (scaled <= cSize + 0.5) {
+            return (cStart + cSize / 2) - (baseStart + scaled / 2);
+        }
+        const min = cStart + cSize - baseStart - scaled;
+        const max = cStart - baseStart;
+        return Math.max(min, Math.min(max, t));
+    }
+
     function clamp() {
-        if (state.scale <= 1.001) {
-            state.scale = 1;
-            state.x = 0;
-            state.y = 0;
-            return;
-        }
-
-        const r = getContainerRect();
-        const { baseWidth, baseHeight } = getBaseSize();
-
-        const scaledW = baseWidth * state.scale;
-        const scaledH = baseHeight * state.scale;
-
-        const overflowX = scaledW - r.width;
-        const overflowY = scaledH - r.height;
-
-        if (overflowX > 0) {
-            const maxX = overflowX / 2;
-            state.x = Math.max(-maxX, Math.min(maxX, state.x));
-        } else {
-            state.x = 0;
-        }
-
-        if (overflowY > 0) {
-            const maxY = overflowY / 2;
-            state.y = Math.max(-maxY, Math.min(maxY, state.y));
-        } else {
-            state.y = 0;
-        }
+        if (state.scale <= 1.001) state.scale = 1;
+        const c = getContainerRect();
+        state.x = clampAxis(state.x, base.left, base.width, c.left, c.width, state.scale);
+        state.y = clampAxis(state.y, base.top, base.height, c.top, c.height, state.scale);
     }
 
     function apply() {
-        // Keep existing CSS transform (if any) and append our pan/zoom
-        const extra = `translate3d(${state.x}px, ${state.y}px, 0) scale(${state.scale})`;
-        img.style.transform = (cssTransform ? (cssTransform + ' ') : '') + extra;
+        img.style.transform = `translate3d(${state.x}px, ${state.y}px, 0) scale(${state.scale})`;
 
         const zoomed = state.scale > 1.01;
         img.classList.toggle('zoomed', zoomed);
 
-        // Cursor feedback
         const cursor = zoomed ? (state.dragging ? 'grabbing' : 'grab') : 'zoom-in';
         container.style.cursor = cursor;
         img.style.cursor = cursor;
 
-        // Hide nav buttons when zoomed (so panning doesn’t fight with nav)
         const nav = document.querySelector('.viewer-nav');
         if (nav) {
             nav.style.opacity = zoomed ? '0' : '';
@@ -162,38 +145,53 @@ function initViewer(opts) {
         state.y = 0;
         state.dragging = false;
         state.moved = false;
+        measureBase();
         apply();
     }
 
     function zoomAt(newScale, clientX, clientY) {
+        if (state.scale <= 1.001) measureBase();
+
         const maxZ = getMaxZoom();
         newScale = Math.max(1, Math.min(maxZ, newScale));
         if (Math.abs(newScale - state.scale) < 0.0005) return;
 
-        const rect = getContainerRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
+        const f = (clientX - base.left - state.x) / (base.width * state.scale);
+        const g = (clientY - base.top - state.y) / (base.height * state.scale);
 
-        const mouseX = clientX - centerX;
-        const mouseY = clientY - centerY;
-
-        // Convert mouse position to image-local coords at current scale
-        const imgX = (mouseX - state.x) / state.scale;
-        const imgY = (mouseY - state.y) / state.scale;
-
-        // Update translate so the same image point stays under the cursor
-        state.x = mouseX - imgX * newScale;
-        state.y = mouseY - imgY * newScale;
+        state.x = clientX - base.left - f * base.width * newScale;
+        state.y = clientY - base.top - g * base.height * newScale;
         state.scale = newScale;
 
         clamp();
         apply();
     }
 
-    // Make sure we capture CSS transform after the image actually lays out
+    function upgradeToOriginal() {
+        const orig = img.dataset.original;
+        if (!orig || img.dataset.upgraded) return;
+        img.dataset.upgraded = 'pending';
+
+        const hi = new Image();
+        hi.src = orig;
+
+        // Decode off-screen before swapping so the visible <img> paints from
+        // cache instead of re-decoding the multi-MB file and blanking.
+        const swap = () => {
+            img.src = orig;
+            img.dataset.upgraded = 'true';
+        };
+        if (hi.decode) {
+            hi.decode().then(swap).catch(() => { img.dataset.upgraded = ''; });
+        } else {
+            hi.onload = swap;
+            hi.onerror = () => { img.dataset.upgraded = ''; };
+        }
+    }
+
     function onReady() {
-        refreshCssTransform();
         reset();
+        upgradeToOriginal();
     }
     if (img.complete) onReady();
     else img.addEventListener('load', onReady, { once: true });
@@ -351,13 +349,13 @@ function initViewer(opts) {
 
     // Recompute preserved CSS transform on resize (common source of broken zoom math/layout)
     window.addEventListener('resize', () => {
-        refreshCssTransform();
+        measureBase();
         clamp();
         apply();
     }, { passive: true });
 
     // Initial paint
-    refreshCssTransform();
+    measureBase();
     apply();
 }
 

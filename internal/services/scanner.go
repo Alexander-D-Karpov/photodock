@@ -3,9 +3,11 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -26,6 +28,17 @@ type ScannerService struct {
 
 func NewScannerService(db *database.DB, thumbSvc *ThumbnailService, exifSvc *ExifService, mediaRoot string) *ScannerService {
 	return &ScannerService{db: db, thumbSvc: thumbSvc, exifSvc: exifSvc, mediaRoot: mediaRoot}
+}
+
+// orientedDimensions returns width/height swapped when the EXIF orientation
+// indicates a 90° rotation (values 5–8). Kept for callers that read raw header
+// dimensions; the thumbnail service auto-orients on decode, so its dimensions
+// are already post-rotation and must not be swapped again.
+func orientedDimensions(width, height, orientation int) (int, int) {
+	if orientation >= 5 && orientation <= 8 {
+		return height, width
+	}
+	return width, height
 }
 
 func (s *ScannerService) ScanAll(ctx context.Context) error {
@@ -70,7 +83,7 @@ func (s *ScannerService) scanDir(ctx context.Context, relPath string, currentFol
 				log.Printf("scan dir error %s: %v", entryRelPath, err)
 			}
 		} else if isImageFile(entry.Name()) {
-			if err := s.processPhoto(ctx, entryRelPath, currentFolderID); err != nil {
+			if err := s.processPhoto(ctx, entryRelPath, currentFolderID, 0); err != nil {
 				log.Printf("process photo error %s: %v", entryRelPath, err)
 			}
 		}
@@ -97,7 +110,7 @@ func (s *ScannerService) ensureFolder(ctx context.Context, path, name string, pa
 	return id, nil
 }
 
-func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folderID *int) error {
+func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folderID *int, rotation int) error {
 	var exists bool
 	err := s.db.Pool().QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM photos WHERE path = $1)", relPath).Scan(&exists)
 	if err != nil {
@@ -116,6 +129,8 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 		}
 	}
 
+	rotation = NormalizeRotation(rotation)
+
 	absPath := filepath.Join(s.mediaRoot, relPath)
 	info, err := os.Stat(absPath)
 	if err != nil {
@@ -127,8 +142,8 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 	}
 
 	exifInfo, takenAt, _ := s.exifSvc.Extract(absPath)
-	width, height, _ := s.thumbSvc.GetImageDimensions(relPath)
-	blurhash, _ := s.thumbSvc.GenerateBlurhash(relPath)
+	width, height, _ := s.thumbSvc.GetImageDimensions(relPath, rotation)
+	blurhash, _ := s.thumbSvc.GenerateBlurhash(relPath, rotation)
 
 	var exifJSON []byte
 	if exifInfo != nil {
@@ -145,20 +160,18 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 
 		var photoID int
 		err = s.db.Pool().QueryRow(ctx,
-			`INSERT INTO photos (folder_id, filename, path, url_path, width, height, size_bytes, blurhash, exif_data, taken_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			`INSERT INTO photos (folder_id, filename, path, url_path, width, height, size_bytes, blurhash, exif_data, taken_at, rotation)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (path) DO NOTHING
 			RETURNING id`,
-			folderID, filepath.Base(relPath), relPath, urlPath, width, height, info.Size(), blurhash, exifJSON, takenAtPtr).Scan(&photoID)
+			folderID, filepath.Base(relPath), relPath, urlPath, width, height, info.Size(), blurhash, exifJSON, takenAtPtr, rotation).Scan(&photoID)
 
 		if err != nil && strings.Contains(err.Error(), "no rows") {
 			return nil
 		}
 
 		if err == nil {
-			_, _ = s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "small")
-			_, _ = s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "medium")
-			_, _ = s.thumbSvc.GetThumbnailPathByID(photoID, relPath, "large")
+			s.thumbSvc.RebuildDerivatives(photoID, relPath, blurhash, rotation, width, height)
 			return nil
 		}
 
@@ -173,20 +186,21 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 }
 
 func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
-	rows, err := s.db.Pool().Query(ctx, "SELECT id, path FROM photos ORDER BY id")
+	rows, err := s.db.Pool().Query(ctx, "SELECT id, path, COALESCE(rotation, 0) FROM photos ORDER BY id")
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
 	type photoRow struct {
-		id   int
-		path string
+		id       int
+		path     string
+		rotation int
 	}
 	var photos []photoRow
 	for rows.Next() {
 		var p photoRow
-		if err := rows.Scan(&p.id, &p.path); err != nil {
+		if err := rows.Scan(&p.id, &p.path, &p.rotation); err != nil {
 			continue
 		}
 		photos = append(photos, p)
@@ -202,8 +216,11 @@ func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
 			continue
 		}
 
+		rotation := NormalizeRotation(p.rotation)
+
 		exifInfo, takenAt, _ := s.exifSvc.Extract(absPath)
-		width, height, _ := s.thumbSvc.GetImageDimensions(p.path)
+		width, height, _ := s.thumbSvc.GetImageDimensions(p.path, rotation)
+		blurhash, _ := s.thumbSvc.GenerateBlurhash(p.path, rotation)
 
 		var exifJSON []byte
 		if exifInfo != nil {
@@ -215,8 +232,6 @@ func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
 			takenAtPtr = &takenAt
 		}
 
-		blurhash, _ := s.thumbSvc.GenerateBlurhash(p.path)
-
 		_, err := s.db.Pool().Exec(ctx,
 			`UPDATE photos SET 
 				width = $1, height = $2, exif_data = $3, taken_at = COALESCE($4, taken_at),
@@ -226,7 +241,10 @@ func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
 
 		if err != nil {
 			log.Printf("reprocess error photo %d (%s): %v", p.id, p.path, err)
+			continue
 		}
+
+		s.thumbSvc.RebuildDerivatives(p.id, p.path, blurhash, rotation, width, height)
 
 		if (i+1)%100 == 0 {
 			log.Printf("Reprocessed %d/%d photos", i+1, len(photos))
@@ -378,5 +396,74 @@ func (s *ScannerService) RegenerateURLPaths(ctx context.Context) error {
 
 func isImageFile(name string) bool {
 	ext := strings.ToLower(filepath.Ext(name))
-	return ext == ".jpg" || ext == ".jpeg" || ext == ".png"
+	return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".arw"
+}
+
+func (s *ScannerService) ImportFile(ctx context.Context, relPath string, folderID *int, rotation int) error {
+	return s.processPhoto(ctx, relPath, folderID, rotation)
+}
+
+func (s *ScannerService) DedupPhotos(ctx context.Context) error {
+	rows, err := s.db.Pool().Query(ctx,
+		"SELECT size_bytes FROM photos GROUP BY size_bytes HAVING COUNT(*) > 1")
+	if err != nil {
+		return err
+	}
+	var sizes []int64
+	for rows.Next() {
+		var sz int64
+		if err := rows.Scan(&sz); err == nil {
+			sizes = append(sizes, sz)
+		}
+	}
+	rows.Close()
+
+	for _, sz := range sizes {
+		grp, err := s.db.Pool().Query(ctx, "SELECT id, path FROM photos WHERE size_bytes = $1 ORDER BY id", sz)
+		if err != nil {
+			continue
+		}
+		type row struct {
+			id   int
+			path string
+		}
+		var items []row
+		for grp.Next() {
+			var r row
+			if err := grp.Scan(&r.id, &r.path); err == nil {
+				items = append(items, r)
+			}
+		}
+		grp.Close()
+
+		seen := make(map[string]int)
+		for _, it := range items {
+			sum, err := fileHash(filepath.Join(s.mediaRoot, it.path))
+			if err != nil {
+				continue
+			}
+			if _, ok := seen[sum]; ok {
+				_, _ = s.db.Pool().Exec(ctx, "DELETE FROM photos WHERE id = $1", it.id)
+				_ = s.thumbSvc.DeleteThumbnailsByID(it.id)
+				_ = os.Remove(filepath.Join(s.mediaRoot, it.path))
+				log.Printf("dedup removed duplicate photo %d (%s)", it.id, it.path)
+			} else {
+				seen[sum] = it.id
+			}
+		}
+	}
+	return nil
+}
+
+func fileHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

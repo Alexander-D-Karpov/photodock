@@ -246,31 +246,6 @@ func getInt(data map[string]interface{}, key string) int {
 	return 0
 }
 
-func decodeCanonLevel(s string) string {
-	s = strings.TrimSpace(s)
-	switch strings.ToLower(s) {
-	case "0", "normal":
-		return "Normal"
-	case "1", "low":
-		return "Low"
-	case "2", "high":
-		return "High"
-	default:
-		if s != "" {
-			return s
-		}
-		return ""
-	}
-}
-
-func decodeExposureModeValue(val int) string {
-	modes := map[int]string{0: "Auto", 1: "Manual", 2: "Auto bracket"}
-	if m, ok := modes[val]; ok {
-		return m
-	}
-	return ""
-}
-
 func decodeColorSpace(val int) string {
 	switch val {
 	case 1:
@@ -517,6 +492,12 @@ func (s *ExifService) getStringTag(x *exif.Exif, field exif.FieldName) string {
 }
 
 func (s *ExifService) StripGPS(path string) error {
+	if isRawPath(path) {
+		if s.hasExiftool {
+			return exec.Command("exiftool", "-overwrite_original", "-gps:all=", path).Run()
+		}
+		return nil
+	}
 	return stripGPSFromJPEG(path)
 }
 

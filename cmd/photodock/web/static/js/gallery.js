@@ -1,5 +1,7 @@
 (function() {
     const GAP = 4;
+    const MIN_WIDTH = 100;
+    const ASPECT_TOLERANCE = 0.02;
 
     function targetRowHeight() {
         const w = window.innerWidth;
@@ -9,7 +11,7 @@
         return 260;
     }
 
-    function itemAspect(item) {
+    function inlineAspect(item) {
         const el = item.querySelector('.progressive-image');
         if (el && el.style.aspectRatio) {
             const parts = el.style.aspectRatio.split('/');
@@ -17,31 +19,41 @@
             const h = parseFloat(parts[1]);
             if (w > 0 && h > 0) return w / h;
         }
-        return 4 / 3;
+        return 0;
+    }
+
+    function itemAspect(item) {
+        if (item._ar > 0) return item._ar;
+        const ar = inlineAspect(item);
+        item._ar = ar > 0 ? ar : 4 / 3;
+        return item._ar;
+    }
+
+    function orderedGridItems(grid, orderedItems) {
+        if (orderedItems) return orderedItems;
+        const items = Array.from(grid.querySelectorAll('.photo-item'));
+        if (items.length && items[0].dataset.idx !== undefined) {
+            items.sort((a, b) => (parseInt(a.dataset.idx) || 0) - (parseInt(b.dataset.idx) || 0));
+        }
+        return items;
     }
 
     function layoutJustified(orderedItems) {
         const grid = document.getElementById('gallery');
         if (!grid) return;
 
-        let items = orderedItems;
-        if (!items) {
-            items = Array.from(grid.querySelectorAll('.photo-item'));
-            if (items.length && items[0].dataset.idx !== undefined) {
-                items.sort((a, b) => (parseInt(a.dataset.idx) || 0) - (parseInt(b.dataset.idx) || 0));
-            }
-        }
+        const items = orderedGridItems(grid, orderedItems);
         if (!items.length) return;
         items.forEach((item, i) => { item.dataset.idx = i; });
 
         const trigger = grid.querySelector('.load-more-trigger');
         const containerWidth = grid.clientWidth;
-        if (containerWidth <= 0) return;
+        if (containerWidth < MIN_WIDTH) return;
         const target = targetRowHeight();
 
+        const rows = [];
         let row = [];
         let aspectSum = 0;
-        const rows = [];
 
         items.forEach(item => {
             const ar = itemAspect(item);
@@ -49,42 +61,145 @@
             aspectSum += ar;
             const h = (containerWidth - GAP * (row.length - 1)) / aspectSum;
             if (h <= target) {
-                rows.push({ row, height: h });
+                rows.push({ row, height: h, full: true });
                 row = [];
                 aspectSum = 0;
             }
         });
         if (row.length) {
             const h = (containerWidth - GAP * (row.length - 1)) / aspectSum;
-            rows.push({ row, height: Math.min(h, target) });
+            rows.push({ row, height: Math.min(h, target), full: false });
         }
 
-        grid.querySelectorAll('.justified-row').forEach(r => r.remove());
-
+        const frag = document.createDocumentFragment();
         rows.forEach(r => {
             const div = document.createElement('div');
             div.className = 'justified-row';
-            r.row.forEach(({ item, ar }) => {
-                item.style.width = Math.floor(r.height * ar) + 'px';
-                item.style.height = Math.round(r.height) + 'px';
+            const rowHeight = Math.round(r.height);
+            const lastIdx = r.row.length - 1;
+            let used = 0;
+
+            r.row.forEach(({ item, ar }, idx) => {
+                let w;
+                if (r.full && idx === lastIdx) {
+                    w = containerWidth - GAP * lastIdx - used;
+                } else {
+                    w = Math.round(r.height * ar);
+                    used += w;
+                }
+                item.style.width = w + 'px';
+                item.style.height = rowHeight + 'px';
                 div.appendChild(item);
             });
-            grid.appendChild(div);
+            frag.appendChild(div);
         });
+
+        grid.querySelectorAll('.justified-row').forEach(r => r.remove());
+        grid.appendChild(frag);
         if (trigger) grid.appendChild(trigger);
     }
 
-    let resizeTimer = null;
-    let lastWidth = window.innerWidth;
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            if (window.innerWidth !== lastWidth) {
-                lastWidth = window.innerWidth;
-                layoutJustified();
-            }
-        }, 120);
-    });
+    let relayoutTimer = null;
+    function scheduleRelayout() {
+        clearTimeout(relayoutTimer);
+        relayoutTimer = setTimeout(() => layoutJustified(), 60);
+    }
+
+    function observeGrid() {
+        const grid = document.getElementById('gallery');
+        if (!grid || grid.dataset.justifiedObserved) return;
+        grid.dataset.justifiedObserved = 'true';
+
+        let lastWidth = grid.clientWidth;
+
+        if ('ResizeObserver' in window) {
+            const ro = new ResizeObserver(entries => {
+                for (const entry of entries) {
+                    const w = entry.target.clientWidth;
+                    if (Math.abs(w - lastWidth) > 1) {
+                        lastWidth = w;
+                        layoutJustified();
+                    }
+                }
+            });
+            ro.observe(grid);
+        } else {
+            let resizeTimer = null;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    const w = grid.clientWidth;
+                    if (Math.abs(w - lastWidth) > 1) {
+                        lastWidth = w;
+                        layoutJustified();
+                    }
+                }, 120);
+            });
+        }
+    }
+
+    // Thumbnails are generated auto-oriented, so a loaded thumbnail's natural
+    // dimensions are the true displayed aspect ratio. Trust them over the DB
+    // aspect (which is wrong for portraits stored as landscape) and relay out.
+    function correctAspect(container, img) {
+        if (!img.naturalWidth || !img.naturalHeight) return;
+        const item = container.closest('.photo-item');
+        if (!item) return;
+        const natural = img.naturalWidth / img.naturalHeight;
+        const current = itemAspect(item);
+        if (Math.abs(natural - current) / current > ASPECT_TOLERANCE) {
+            item._ar = natural;
+            container.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight;
+            scheduleRelayout();
+        }
+    }
+
+    // Preload medium fully, then swap src; the browser paints the cached
+    // higher-res image over the small one with no flash.
+    function upgradeToMedium(container) {
+        if (container.dataset.upgraded) return;
+        const img = container.querySelector('.full-image');
+        if (!img) return;
+        const mediumSrc = img.dataset.medium;
+        if (!mediumSrc || img.src.indexOf(mediumSrc) !== -1) {
+            container.dataset.upgraded = 'true';
+            return;
+        }
+        container.dataset.upgraded = 'pending';
+        const hi = new Image();
+        hi.onload = () => {
+            img.src = mediumSrc;
+            container.dataset.upgraded = 'true';
+        };
+        hi.onerror = () => { container.dataset.upgraded = ''; };
+        hi.src = mediumSrc;
+    }
+
+    let mediumObserver = null;
+    function initProgressiveUpgrade() {
+        const containers = document.querySelectorAll('.progressive-image:not([data-observed-medium])');
+        if (!('IntersectionObserver' in window)) {
+            containers.forEach(c => {
+                c.dataset.observedMedium = 'true';
+                upgradeToMedium(c);
+            });
+            return;
+        }
+        if (!mediumObserver) {
+            mediumObserver = new IntersectionObserver((entries, obs) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        upgradeToMedium(entry.target);
+                        obs.unobserve(entry.target);
+                    }
+                });
+            }, { rootMargin: '300px 0px' });
+        }
+        containers.forEach(c => {
+            c.dataset.observedMedium = 'true';
+            mediumObserver.observe(c);
+        });
+    }
 
     function initLazyLoading() {
         document.querySelectorAll('.progressive-image').forEach(container => {
@@ -102,18 +217,19 @@
                 }
             }
 
-            if (fullImage.complete && fullImage.naturalHeight > 0) {
+            const onLoaded = () => {
                 container.classList.add('loaded');
-            } else {
-                fullImage.addEventListener('load', function() {
-                    container.classList.add('loaded');
-                }, { once: true });
+                correctAspect(container, fullImage);
+            };
 
-                fullImage.addEventListener('error', function() {
-                    container.classList.add('loaded');
-                }, { once: true });
+            if (fullImage.complete && fullImage.naturalHeight > 0) {
+                onLoaded();
+            } else {
+                fullImage.addEventListener('load', onLoaded, { once: true });
+                fullImage.addEventListener('error', () => container.classList.add('loaded'), { once: true });
             }
         });
+        initProgressiveUpgrade();
     }
 
     function initFolderLazyLoading() {
@@ -157,8 +273,17 @@
         }
     }
 
+    function revealGrid() {
+        const grid = document.getElementById('gallery');
+        if (grid) grid.classList.add('jl-ready');
+    }
+
     function init() {
         layoutJustified();
+        // Reveal now that items are in their final (justified, or fallback on
+        // narrow viewports) positions — see the html.js #gallery rule in CSS.
+        revealGrid();
+        observeGrid();
         initLazyLoading();
         initFolderLazyLoading();
     }

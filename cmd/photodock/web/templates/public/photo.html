@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
-    <link rel="stylesheet" href="/static/css/public.css">
+    <link rel="stylesheet" href="{{asset "/static/css/public.css"}}">
+    <link rel="icon" type="image/webp" href="{{asset "/static/icon.webp"}}">
 
     <meta property="og:type" content="article">
     <meta property="og:title" content="{{.Title}}">
@@ -52,10 +53,10 @@
             {{if .PhotoPosition}}
             <span class="photo-counter">{{.PhotoPosition}} of {{.PhotoTotal}}</span>
             {{end}}
-            <a href="/original/{{.Photo.ID}}" target="_blank" class="btn-icon" title="View original ({{formatSize .Photo.SizeBytes}})">
+            <a href="/original/{{.Photo.ID}}" target="_blank" class="btn-icon" title="View full resolution">
                 {{template "icon-external"}}
             </a>
-            <a href="/original/{{.Photo.ID}}" download="{{.Photo.Filename}}" class="btn-icon" title="Download original">
+            <a href="/original/{{.Photo.ID}}?raw=1&download=1" download="{{.Photo.Filename}}" class="btn-icon" title="Download original ({{formatSize .Photo.SizeBytes}})">
                 {{template "icon-download"}}
             </a>
             <button class="btn-icon close-btn" onclick="goBack()" title="Close (Esc)">
@@ -253,10 +254,6 @@
                     <dt>Path</dt><dd class="path-value">/p/{{.Photo.URLPath}}</dd>
                 </dl>
 
-                <div class="sidebar-actions">
-                    <a href="/original/{{.Photo.ID}}" target="_blank" class="btn btn-secondary">{{template "icon-external"}} View Original</a>
-                    <a href="/original/{{.Photo.ID}}" download="{{.Photo.Filename}}" class="btn btn-secondary">{{template "icon-download"}} Download</a>
-                </div>
             </div>
         </aside>
     </div>
@@ -265,7 +262,7 @@
         {{template "icon-info"}}
     </button>
 </div>
-<script src="/static/js/viewer.js"></script>
+<script src="{{asset "/static/js/viewer.js"}}"></script>
 <script>
     initViewer({
         prevUrl: {{if .PrevURL}}"{{.PrevURL}}"{{else}}null{{end}},

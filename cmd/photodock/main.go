@@ -35,6 +35,9 @@ func main() {
 	if err := os.MkdirAll(filepath.Join(cfg.CacheDir, "uploads"), 0755); err != nil {
 		log.Fatalf("failed to create CACHE_DIR/uploads (%s): %v", filepath.Join(cfg.CacheDir, "uploads"), err)
 	}
+	if err := os.MkdirAll(filepath.Join(cfg.CacheDir, "staging"), 0755); err != nil {
+		log.Fatalf("failed to create CACHE_DIR/staging (%s): %v", filepath.Join(cfg.CacheDir, "staging"), err)
+	}
 
 	db, err := database.New(cfg.DatabaseURL)
 	if err != nil {
@@ -57,6 +60,9 @@ func main() {
 
 	h := handlers.New(db, cfg, thumbService, scanService, webFS)
 
+	janitorCtx, janitorStop := context.WithCancel(context.Background())
+	h.StartJanitor(janitorCtx)
+
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -78,6 +84,8 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+
+	janitorStop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

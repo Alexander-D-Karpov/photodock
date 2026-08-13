@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - PhotoDock</title>
-    <link rel="stylesheet" href="/static/css/admin.css">
+    <link rel="stylesheet" href="{{asset "/static/css/admin.css"}}">
+    <link rel="icon" type="image/webp" href="{{asset "/static/icon.webp"}}">
 </head>
 <body>
 <div class="admin-container">
@@ -55,9 +56,9 @@
                 <div class="upload-zone-content">
                     {{template "icon-upload"}}
                     <p>Drag & drop photos here or click to select</p>
-                    <p class="upload-hint">Supports JPG, PNG files</p>
+                    <p class="upload-hint">Supports JPG, PNG and Sony RAW (ARW) files</p>
                 </div>
-                <input type="file" id="file-input" multiple accept="image/jpeg,image/png" style="display: none;">
+                <input type="file" id="file-input" multiple accept="image/jpeg,image/png,.arw,.ARW" style="display: none;">
             </div>
 
             <div class="upload-options">
@@ -74,22 +75,22 @@
 
             <div class="upload-preview-section" id="upload-preview-section">
                 <div class="upload-preview-header">
-                    <h3>Selected Files</h3>
+                    <h3>Staged Files</h3>
                     <div class="upload-preview-actions">
-                        <button class="btn btn-small btn-secondary" id="clear-upload" onclick="clearUpload()">Clear All</button>
-                        <button class="btn btn-small btn-primary" id="start-upload" onclick="startUpload()">Upload All</button>
+                        <button class="btn btn-small btn-secondary" id="clear-upload">Clear</button>
+                        <button class="btn btn-small btn-primary" id="start-upload">Add to Gallery</button>
                     </div>
                 </div>
                 <div class="upload-preview-grid" id="upload-preview-grid"></div>
                 <div class="upload-status-bar">
-                    <span class="status-text" id="upload-status-text">No files selected</span>
+                    <span class="status-text" id="upload-status-text">No files staged</span>
                 </div>
             </div>
         </div>
     </main>
 </div>
-<script src="/static/js/admin.js"></script>
-<script src="/static/js/upload.js"></script>
+<script src="{{asset "/static/js/admin.js"}}"></script>
+<script src="{{asset "/static/js/upload.js"}}"></script>
 </body>
 </html>
 {{end}}
