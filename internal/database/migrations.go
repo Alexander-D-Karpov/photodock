@@ -77,6 +77,17 @@ func (db *DB) Migrate() error {
 
 	ALTER TABLE staged_uploads ADD COLUMN IF NOT EXISTS rotation INTEGER NOT NULL DEFAULT 0;
 	ALTER TABLE photos ADD COLUMN IF NOT EXISTS rotation INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE staged_uploads ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
+
+	CREATE TABLE IF NOT EXISTS api_tokens (
+		id SERIAL PRIMARY KEY,
+		name TEXT NOT NULL,
+		token_hash TEXT NOT NULL UNIQUE,
+		prefix TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		last_used_at TIMESTAMPTZ,
+		revoked_at TIMESTAMPTZ
+	);
 	`
 	_, err := db.pool.Exec(context.Background(), schema)
 	return err

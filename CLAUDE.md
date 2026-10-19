@@ -37,6 +37,7 @@ deploy/                      RUNBOOK.md (server-only ops) + logrotate-nginx
 Public routes: `/`, `/folder/{id}`, `/p/{path...}`, `/photo/{id}`, `/thumb/{size}/{id}`,
 `/original/{id}`, `/placeholder/{id}`, `/ogcard/folder/{id}`, `/favicon.ico`.
 Admin routes under `/admin/*` use basic auth (`ADMIN_USER`/`ADMIN_PASS`).
+`/api/v1/token` and `POST /api/v1/staging` use Bearer API tokens (`tokens.go`, managed at `/admin/tokens`).
 Notable admin ops: `POST /admin/reprocess` (rebuild exif/dims/blurhash),
 `POST /admin/regenerate-urls`.
 

@@ -262,6 +262,12 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/staging/{id}/rotate", h.adminAuth(h.stagingRotate))
 	mux.HandleFunc("DELETE /admin/staging/{id}", h.adminAuth(h.stagingDelete))
 
+	mux.HandleFunc("GET /admin/tokens", h.adminAuth(h.adminTokens))
+	mux.HandleFunc("POST /admin/tokens", h.adminAuth(h.adminCreateToken))
+	mux.HandleFunc("POST /admin/tokens/{id}/revoke", h.adminAuth(h.adminRevokeToken))
+	mux.HandleFunc("GET /api/v1/token", h.tokenAuth(h.apiTokenCheck))
+	mux.HandleFunc("POST /api/v1/staging", h.tokenAuth(h.apiStagingUpload))
+
 	mux.HandleFunc("GET /api/folders", h.apiListFolders)
 	mux.HandleFunc("GET /api/folders/{id}", h.apiGetFolder)
 	mux.HandleFunc("GET /api/photos", h.apiListPhotos)

@@ -80,3 +80,22 @@ The admin panel allows you to:
 - Hide/show photos
 - Delete photos and folders
 - Clean orphaned database entries
+- Issue and revoke API tokens (`/admin/tokens`)
+
+### Upload API
+
+Scripts can push photos into **Unsorted** (the staging area) with an API token
+created at `/admin/tokens`. Only a SHA-256 of each token is stored; the token is
+shown once.
+
+```sh
+curl -H "Authorization: Bearer pd_…" https://photos.example.com/api/v1/token          # 200 if valid
+curl -H "Authorization: Bearer pd_…" -F file=@DSC00001.ARW https://photos.example.com/api/v1/staging
+```
+
+- `201` — added to Unsorted (JSON item as in `/admin/staging`)
+- `200` with `"duplicate": true` — a file with the same name and size is already in Unsorted or the library, nothing stored
+- `415` — unsupported type (jpg, jpeg, png, arw)
+- `401` — missing, malformed or revoked token
+
+Token uploads are not expired by the 24 h staging cleanup; they stay until sorted.

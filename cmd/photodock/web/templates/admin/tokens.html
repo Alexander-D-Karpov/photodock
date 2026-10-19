@@ -1,0 +1,91 @@
+{{define "admin/tokens.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="{{asset "/static/css/admin.css"}}">
+    <link rel="icon" type="image/webp" href="{{asset "/static/icon.webp"}}">
+    <style>
+        .token-new { border: 1px solid var(--accent); border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+        .token-new code { display: block; margin: 10px 0; padding: 10px 12px; background: var(--bg-secondary); border-radius: 6px; font-size: 0.9rem; word-break: break-all; user-select: all; }
+        .token-error { color: #f2564b; margin-bottom: 16px; }
+        .token-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 28px; }
+        .token-form .form-group { margin: 0; flex: 1; min-width: 220px; }
+        .token-usage { margin-top: 32px; }
+        .token-usage pre { background: var(--bg-secondary); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+        .admin-table tr.revoked td { opacity: 0.5; }
+        .admin-table code { font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+<div class="admin-container">
+    <nav class="admin-nav">
+        <a href="/admin">{{template "icon-home"}} Dashboard</a>
+        <a href="/admin/folders">{{template "icon-folder-small"}} Folders</a>
+        <a href="/admin/photos">{{template "icon-image"}} Photos</a>
+        <a href="/admin/stats">{{template "icon-scan"}} Stats</a>
+        <a href="/admin/tokens" class="active">{{template "icon-upload"}} API tokens</a>
+        <a href="/" target="_blank">{{template "icon-external"}} View Site</a>
+    </nav>
+
+    <main class="admin-main">
+        <div class="page-header">
+            <h1>API tokens</h1>
+        </div>
+        <p class="upload-hint">A token lets a script upload photos into <b>Unsorted</b> without the admin password. Revoke it any time.</p>
+
+        {{if .Error}}<p class="token-error">{{.Error}}</p>{{end}}
+
+        {{if .NewToken}}
+        <div class="token-new">
+            <b>Token "{{.NewName}}" created.</b> Copy it now — it is shown only once.
+            <code>{{.NewToken}}</code>
+        </div>
+        {{end}}
+
+        <form class="token-form" action="/admin/tokens" method="POST" autocomplete="off">
+            <div class="form-group">
+                <label for="token-name">Name</label>
+                <input type="text" name="name" id="token-name" placeholder="camera importer" maxlength="100" required>
+            </div>
+            <button type="submit" class="btn btn-primary">{{template "icon-plus"}} Create token</button>
+        </form>
+
+        <div class="folders-table-container">
+            <table class="admin-table">
+                <thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+                <tbody>
+                {{range .Tokens}}
+                <tr class="{{if .RevokedAt}}revoked{{end}}">
+                    <td>{{.Name}}</td>
+                    <td><code>{{.Prefix}}…</code></td>
+                    <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+                    <td>{{if .LastUsedAt}}{{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}never{{end}}</td>
+                    <td>
+                        {{if .RevokedAt}}revoked {{.RevokedAt.Format "2006-01-02"}}{{else}}
+                        <form action="/admin/tokens/{{.ID}}/revoke" method="POST" onsubmit="return confirm('Revoke this token? Scripts using it will stop working.')">
+                            <button type="submit" class="btn btn-small btn-danger">Revoke</button>
+                        </form>
+                        {{end}}
+                    </td>
+                </tr>
+                {{else}}
+                <tr><td colspan="5">No tokens yet.</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+
+        <section class="token-usage">
+            <h2>Usage</h2>
+            <pre>curl -H "Authorization: Bearer pd_…" {{.BaseURL}}/api/v1/token
+curl -H "Authorization: Bearer pd_…" -F file=@DSC00001.ARW {{.BaseURL}}/api/v1/staging</pre>
+            <p class="upload-hint">201 — added to Unsorted; 200 with <code>"duplicate": true</code> — a file with the same name and size is already in Unsorted or the library. Supported: jpg, jpeg, png, arw. Uploads made with a token stay in Unsorted until you sort them.</p>
+        </section>
+    </main>
+</div>
+</body>
+</html>
+{{end}}

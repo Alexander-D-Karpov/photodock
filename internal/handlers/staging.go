@@ -144,7 +144,7 @@ func (h *Handlers) stagingRotate(w http.ResponseWriter, r *http.Request) {
 	h.jsonResponse(w, it)
 }
 
-func (h *Handlers) finishStaging(ctx context.Context, id string, seq int64, filename, srcPath string) (*stagedItem, error) {
+func (h *Handlers) finishStaging(ctx context.Context, id string, seq int64, filename, srcPath, source string) (*stagedItem, error) {
 	info, err := os.Stat(srcPath)
 	if err != nil {
 		return nil, err
@@ -156,9 +156,9 @@ func (h *Handlers) finishStaging(ctx context.Context, id string, seq int64, file
 	isRaw := isRawExt(filename)
 
 	_, err = h.db.Pool().Exec(ctx,
-		`INSERT INTO staged_uploads (id, seq, filename, size_bytes, width, height, is_raw, rotation)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, 0)`,
-		id, seq, filename, info.Size(), pw, ph, isRaw)
+		`INSERT INTO staged_uploads (id, seq, filename, size_bytes, width, height, is_raw, rotation, source)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8)`,
+		id, seq, filename, info.Size(), pw, ph, isRaw, source)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (h *Handlers) stagingUploadSimple(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = dst.Close()
 
-	item, err := h.finishStaging(r.Context(), id, seq, filename, dstPath)
+	item, err := h.finishStaging(r.Context(), id, seq, filename, dstPath, "")
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		http.Error(w, err.Error(), 500)
@@ -305,7 +305,7 @@ func (h *Handlers) stagingFinalize(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = dst.Close()
 
-	item, err := h.finishStaging(r.Context(), id, up.Seq, up.Filename, dstPath)
+	item, err := h.finishStaging(r.Context(), id, up.Seq, up.Filename, dstPath, "")
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		http.Error(w, err.Error(), 500)
@@ -425,7 +425,8 @@ func (h *Handlers) stagingDelete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) CleanupStaging(ctx context.Context) {
 	rows, err := h.db.Pool().Query(ctx,
-		"SELECT id FROM staged_uploads WHERE created_at < $1", time.Now().Add(-stagingMaxAge))
+		// browser sessions expire; API (importer) uploads wait until someone sorts them
+		"SELECT id FROM staged_uploads WHERE created_at < $1 AND source <> $2", time.Now().Add(-stagingMaxAge), stagingSourceAPI)
 	if err == nil {
 		var ids []string
 		for rows.Next() {
