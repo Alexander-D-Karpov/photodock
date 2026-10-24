@@ -649,7 +649,17 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		"PreviewWidth":  previewWidth,
 		"PreviewHeight": previewHeight,
 		"ColorInfo":     colorInfo,
+		"Develop":       h.photoDevelopSummary(ctx, photo),
 	})
+}
+
+// photoDevelopSummary describes how the published render was developed, or
+// nil for unedited photos.
+func (h *Handlers) photoDevelopSummary(ctx context.Context, photo *models.Photo) *develop.Summary {
+	if h.develop == nil || photo.EditHash == "" {
+		return nil
+	}
+	return h.develop.PhotoSummary(ctx, photo.ID)
 }
 
 func contentDisposition(disp, filename string) string {
@@ -688,7 +698,9 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if file, ok := h.publishedFile(id, editHash, size+".jpg"); ok {
+	// ?unedited=1 is the photo page's "hold to compare" view of the original.
+	unedited := r.URL.Query().Get("unedited") == "1"
+	if file, ok := h.publishedFile(id, editHash, size+".jpg"); ok && !unedited {
 		setDerivedCache(w, r, editHash)
 		w.Header().Set("Content-Type", "image/jpeg")
 		http.ServeFile(w, r, file)
@@ -706,7 +718,11 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		contentType = "image/png"
 	}
 
-	setLegacyCache(w, editHash)
+	if unedited {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	} else {
+		setLegacyCache(w, editHash)
+	}
 	w.Header().Set("Content-Type", contentType)
 
 	http.ServeFile(w, r, thumbPath)

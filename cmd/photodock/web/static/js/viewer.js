@@ -354,9 +354,52 @@ function initViewer(opts) {
         apply();
     }, { passive: true });
 
+    initCompare(img);
+
     // Initial paint
     measureBase();
     apply();
+}
+
+// initCompare shows the unedited photo while a compare button (top bar or
+// sidebar) or the B key is held, then restores whatever was displayed.
+function initCompare(img) {
+    const btns = Array.from(document.querySelectorAll('.develop-compare-btn'));
+    if (!btns.length || !img) return;
+    const before = btns[0].dataset.before;
+    let saved = null;
+    new Image().src = before;
+
+    const show = () => {
+        if (saved !== null) return;
+        saved = img.src;
+        img.src = before;
+        btns.forEach((b) => b.classList.add('active'));
+    };
+    const hide = () => {
+        if (saved === null) return;
+        img.src = saved;
+        saved = null;
+        btns.forEach((b) => b.classList.remove('active'));
+    };
+
+    btns.forEach((btn) => {
+        btn.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            btn.setPointerCapture(e.pointerId);
+            show();
+        });
+        ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((t) => btn.addEventListener(t, hide));
+        btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    });
+    document.addEventListener('keydown', (e) => {
+        const tag = e.target && e.target.tagName;
+        if ((e.key === 'b' || e.key === 'B') && tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.repeat) show();
+    });
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'b' || e.key === 'B') hide();
+    });
+    window.addEventListener('blur', hide);
 }
 
 function goBack() {
