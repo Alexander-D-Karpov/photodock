@@ -13,6 +13,7 @@ import (
 
 	"github.com/Alexander-D-Karpov/photodock/internal/config"
 	"github.com/Alexander-D-Karpov/photodock/internal/database"
+	"github.com/Alexander-D-Karpov/photodock/internal/develop"
 	"github.com/Alexander-D-Karpov/photodock/internal/handlers"
 	"github.com/Alexander-D-Karpov/photodock/internal/services"
 )
@@ -38,6 +39,9 @@ func main() {
 	if err := os.MkdirAll(filepath.Join(cfg.CacheDir, "staging"), 0755); err != nil {
 		log.Fatalf("failed to create CACHE_DIR/staging (%s): %v", filepath.Join(cfg.CacheDir, "staging"), err)
 	}
+	if err := os.MkdirAll(filepath.Join(cfg.CacheDir, "develop"), 0755); err != nil {
+		log.Fatalf("failed to create CACHE_DIR/develop (%s): %v", filepath.Join(cfg.CacheDir, "develop"), err)
+	}
 
 	db, err := database.New(cfg.DatabaseURL)
 	if err != nil {
@@ -58,10 +62,13 @@ func main() {
 	exifService := services.NewExifService()
 	scanService := services.NewScannerService(db, thumbService, exifService, cfg.MediaRoot)
 
-	h := handlers.New(db, cfg, thumbService, scanService, webFS)
+	developEngine := develop.NewFromConfig(db, thumbService, cfg)
 
-	janitorCtx, janitorStop := context.WithCancel(context.Background())
-	h.StartJanitor(janitorCtx)
+	h := handlers.New(db, cfg, thumbService, scanService, developEngine, webFS)
+
+	bgCtx, bgStop := context.WithCancel(context.Background())
+	h.StartJanitor(bgCtx)
+	developEngine.Start(bgCtx)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -85,7 +92,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	janitorStop()
+	bgStop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

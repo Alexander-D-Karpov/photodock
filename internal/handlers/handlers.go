@@ -28,6 +28,7 @@ import (
 
 	"github.com/Alexander-D-Karpov/photodock/internal/config"
 	"github.com/Alexander-D-Karpov/photodock/internal/database"
+	"github.com/Alexander-D-Karpov/photodock/internal/develop"
 	"github.com/Alexander-D-Karpov/photodock/internal/models"
 	"github.com/Alexander-D-Karpov/photodock/internal/services"
 	"github.com/disintegration/imaging"
@@ -38,6 +39,7 @@ type Handlers struct {
 	cfg        *config.Config
 	thumbSvc   *services.ThumbnailService
 	scanSvc    *services.ScannerService
+	develop    *develop.Engine
 	tmpl       *template.Template
 	webFS      embed.FS
 	uploads    map[string]*ChunkedUpload
@@ -101,6 +103,26 @@ func templateFuncMap(assetVersions map[string]string) template.FuncMap {
 			}
 			return p
 		},
+		"thumb": func(size string, id int, hash string) string {
+			return versionedURL(fmt.Sprintf("/thumb/%s/%d", size, id), hash)
+		},
+		"placeholder": func(id int, hash string) string {
+			return versionedURL(fmt.Sprintf("/placeholder/%d", id), hash)
+		},
+		"original": func(id int, hash string) string {
+			return versionedURL(fmt.Sprintf("/original/%d", id), hash)
+		},
+		// importMap lets ES modules under prefix import each other by bare path
+		// while the browser still fetches the content-hashed ?v= URLs.
+		"importMap": func(prefix string) map[string]interface{} {
+			imports := map[string]string{}
+			for p, v := range assetVersions {
+				if strings.HasPrefix(p, prefix) && strings.HasSuffix(p, ".js") {
+					imports[p] = p + "?v=" + v
+				}
+			}
+			return map[string]interface{}{"imports": imports}
+		},
 		"json": func(v interface{}) template.JS {
 			b, _ := json.Marshal(v)
 			return template.JS(b)
@@ -160,7 +182,7 @@ func LoadTemplates(webFS fs.FS) (*template.Template, error) {
 	return tmpl, nil
 }
 
-func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailService, scanSvc *services.ScannerService, webFS embed.FS) *Handlers {
+func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailService, scanSvc *services.ScannerService, dev *develop.Engine, webFS embed.FS) *Handlers {
 	tmpl, err := LoadTemplates(webFS)
 	if err != nil {
 		log.Printf("template load error: %v", err)
@@ -171,6 +193,7 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 		cfg:      cfg,
 		thumbSvc: thumbSvc,
 		scanSvc:  scanSvc,
+		develop:  dev,
 		tmpl:     tmpl,
 		webFS:    webFS,
 		uploads:  make(map[string]*ChunkedUpload),
@@ -275,6 +298,8 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/random", h.apiRandomPhoto)
 	mux.HandleFunc("GET /random", h.publicRandomPhoto)
 	mux.HandleFunc("POST /admin/reprocess", h.adminAuth(h.adminReprocess))
+
+	h.registerDevelopRoutes(mux)
 }
 
 // faviconICO serves the embedded site icon for browsers (and crawlers) that
@@ -355,7 +380,7 @@ func (h *Handlers) jsonPhotosPage(w http.ResponseWriter, r *http.Request, ctx co
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, filename, COALESCE(url_path, ''), title, size_bytes, blurhash, 
+		SELECT id, filename, COALESCE(url_path, ''), title, size_bytes, blurhash, width, height, COALESCE(edit_hash, ''),
 		       COALESCE(EXTRACT(EPOCH FROM taken_at), EXTRACT(EPOCH FROM created_at))::bigint as date
 		FROM photos WHERE %s 
 		ORDER BY COALESCE(taken_at, created_at) DESC, id DESC 
@@ -381,17 +406,25 @@ func (h *Handlers) jsonPhotosPage(w http.ResponseWriter, r *http.Request, ctx co
 		Title    string `json:"title"`
 		Size     int64  `json:"size"`
 		Blurhash string `json:"blurhash"`
-		Date     int64  `json:"date"`
+		Width    int    `json:"width"`
+		Height   int    `json:"height"`
+		EditHash string `json:"edit_hash,omitempty"`
+		// Ready-made, edit-versioned image URLs; clients should use these
+		// rather than building /thumb/... from the id.
+		Thumb       string `json:"thumb"`
+		Medium      string `json:"medium"`
+		Placeholder string `json:"placeholder"`
+		Date        int64  `json:"date"`
 	}
 
-	var photos []photoJSON
+	photos := []photoJSON{}
 	for rows.Next() {
 		var p photoJSON
 		var urlPath string
 		var title sql.NullString
 		var blurhash sql.NullString
 
-		if err := rows.Scan(&p.ID, &p.Filename, &urlPath, &title, &p.Size, &blurhash, &p.Date); err != nil {
+		if err := rows.Scan(&p.ID, &p.Filename, &urlPath, &title, &p.Size, &blurhash, &p.Width, &p.Height, &p.EditHash, &p.Date); err != nil {
 			continue
 		}
 
@@ -406,6 +439,9 @@ func (h *Handlers) jsonPhotosPage(w http.ResponseWriter, r *http.Request, ctx co
 		if blurhash.Valid {
 			p.Blurhash = blurhash.String
 		}
+		p.Thumb = versionedURL(fmt.Sprintf("/thumb/small/%d", p.ID), p.EditHash)
+		p.Medium = versionedURL(fmt.Sprintf("/thumb/medium/%d", p.ID), p.EditHash)
+		p.Placeholder = versionedURL(fmt.Sprintf("/placeholder/%d", p.ID), p.EditHash)
 		photos = append(photos, p)
 	}
 
@@ -535,6 +571,21 @@ func (h *Handlers) publicPhotoByID(w http.ResponseWriter, r *http.Request) {
 	h.renderPhoto(w, r, photo)
 }
 
+// adjacentOriginals returns edit-versioned /original URLs for the viewer to
+// prefetch; an unversioned URL could serve a stale cached render.
+func (h *Handlers) adjacentOriginals(ctx context.Context, ids ...int) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		var hash string
+		_ = h.db.Pool().QueryRow(ctx, "SELECT COALESCE(edit_hash, '') FROM photos WHERE id = $1", id).Scan(&hash)
+		out[i] = versionedURL(fmt.Sprintf("/original/%d", id), hash)
+	}
+	return out
+}
+
 func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *models.Photo) {
 	ctx := r.Context()
 
@@ -544,6 +595,7 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 	}
 
 	prevURL, nextURL, prevID, nextID := h.getAdjacentPhotoInfo(ctx, photo)
+	originals := h.adjacentOriginals(ctx, prevID, nextID)
 	breadcrumbs := h.getPhotoBreadcrumbs(ctx, photo)
 	position, total := h.getPhotoPosition(ctx, photo)
 
@@ -586,6 +638,8 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		"NextURL":       nextURL,
 		"PrevID":        prevID,
 		"NextID":        nextID,
+		"PrevOriginal":  originals[0],
+		"NextOriginal":  originals[1],
 		"Breadcrumbs":   breadcrumbs,
 		"Title":         title,
 		"FolderURL":     folderURL,
@@ -625,11 +679,19 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var path string
+	var path, editHash string
 	var rotation int
 	if err := h.db.Pool().QueryRow(r.Context(),
-		"SELECT path, COALESCE(rotation, 0) FROM photos WHERE id = $1", id).Scan(&path, &rotation); err != nil {
+		"SELECT path, COALESCE(rotation, 0), COALESCE(edit_hash, '') FROM photos WHERE id = $1", id).
+		Scan(&path, &rotation, &editHash); err != nil {
 		http.NotFound(w, r)
+		return
+	}
+
+	if file, ok := h.publishedFile(id, editHash, size+".jpg"); ok {
+		setDerivedCache(w, r, editHash)
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeFile(w, r, file)
 		return
 	}
 
@@ -644,7 +706,7 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		contentType = "image/png"
 	}
 
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	setLegacyCache(w, editHash)
 	w.Header().Set("Content-Type", contentType)
 
 	http.ServeFile(w, r, thumbPath)
@@ -653,10 +715,19 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) servePlaceholder(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
 
-	var blurhash string
+	var blurhash, editHash string
 	var width, height int
-	if err := h.db.Pool().QueryRow(r.Context(), "SELECT COALESCE(blurhash, ''), width, height FROM photos WHERE id = $1", id).Scan(&blurhash, &width, &height); err != nil {
+	if err := h.db.Pool().QueryRow(r.Context(),
+		"SELECT COALESCE(blurhash, ''), width, height, COALESCE(edit_hash, '') FROM photos WHERE id = $1", id).
+		Scan(&blurhash, &width, &height, &editHash); err != nil {
 		http.NotFound(w, r)
+		return
+	}
+
+	if file, ok := h.publishedFile(id, editHash, "placeholder.png"); ok {
+		setDerivedCache(w, r, editHash)
+		w.Header().Set("Content-Type", "image/png")
+		http.ServeFile(w, r, file)
 		return
 	}
 
@@ -666,7 +737,7 @@ func (h *Handlers) servePlaceholder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	setLegacyCache(w, editHash)
 	w.Header().Set("Content-Type", "image/png")
 
 	http.ServeFile(w, r, placeholderPath)
@@ -682,6 +753,7 @@ func (h *Handlers) adminDeletePhoto(w http.ResponseWriter, r *http.Request) {
 
 	if path != "" {
 		_ = h.thumbSvc.DeleteThumbnailsByID(id)
+		_ = os.RemoveAll(h.thumbSvc.DevelopDir(id))
 		_ = os.Remove(filepath.Join(h.cfg.MediaRoot, path))
 	}
 
@@ -691,12 +763,12 @@ func (h *Handlers) adminDeletePhoto(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) serveOriginal(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.PathValue("id"))
 
-	var path, filename string
+	var path, filename, editHash string
 	var rotation int
 	var hidden bool
 	err := h.db.Pool().QueryRow(r.Context(),
-		"SELECT path, filename, COALESCE(rotation, 0), hidden FROM photos WHERE id = $1", id).
-		Scan(&path, &filename, &rotation, &hidden)
+		"SELECT path, filename, COALESCE(rotation, 0), hidden, COALESCE(edit_hash, '') FROM photos WHERE id = $1", id).
+		Scan(&path, &filename, &rotation, &hidden, &editHash)
 	if err != nil || hidden || !h.isPathSafe(path) {
 		http.NotFound(w, r)
 		return
@@ -707,21 +779,35 @@ func (h *Handlers) serveOriginal(w http.ResponseWriter, r *http.Request) {
 
 	wantRaw := r.URL.Query().Get("raw") == "1"
 	download := r.URL.Query().Get("download") == "1"
+	unedited := r.URL.Query().Get("unedited") == "1"
 
+	disp := "inline"
+	if download {
+		disp = "attachment"
+	}
+	jpgName := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
+
+	if !wantRaw && !unedited {
+		if file, ok := h.publishedFile(id, editHash, "full.jpg"); ok {
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("Content-Disposition", contentDisposition(disp, jpgName))
+			setDerivedCache(w, r, editHash)
+			http.ServeFile(w, r, file)
+			return
+		}
+	}
+
+	// Unversioned /original/{id} must not stick in caches for a year: once a
+	// photo is edited the same URL starts serving the rendered version.
 	if isRawExt(filename) && !wantRaw {
 		webPath, werr := h.thumbSvc.RawWebPath(filepath.Join(h.cfg.MediaRoot, path), rotation)
 		if werr != nil {
 			http.Error(w, werr.Error(), 500)
 			return
 		}
-		disp := "inline"
-		if download {
-			disp = "attachment"
-		}
-		jpgName := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Content-Disposition", contentDisposition(disp, jpgName))
-		w.Header().Set("Cache-Control", "public, max-age=31536000")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
 		http.ServeFile(w, r, webPath)
 		return
 	}
@@ -735,15 +821,13 @@ func (h *Handlers) serveOriginal(w http.ResponseWriter, r *http.Request) {
 		contentType = "image/x-sony-arw"
 	}
 
-	disp := "inline"
-	if isRawExt(filename) || download {
+	if isRawExt(filename) {
 		disp = "attachment"
 	}
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", contentDisposition(disp, filename))
-
-	w.Header().Set("Cache-Control", "public, max-age=31536000")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeFile(w, r, filepath.Join(h.cfg.MediaRoot, path))
 }
 
@@ -887,7 +971,7 @@ func (h *Handlers) adminPhotos(w http.ResponseWriter, r *http.Request) {
 	showHidden := r.URL.Query().Get("hidden") == "1"
 	searchQuery := r.URL.Query().Get("q")
 
-	query := "SELECT id, folder_id, filename, path, title, hidden, width, height FROM photos WHERE 1=1"
+	query := "SELECT id, folder_id, filename, path, title, hidden, width, height, COALESCE(edit_hash, '') FROM photos WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM photos WHERE 1=1"
 	var args []interface{}
 	argIdx := 1
@@ -927,7 +1011,7 @@ func (h *Handlers) adminPhotos(w http.ResponseWriter, r *http.Request) {
 	var photos []models.Photo
 	for rows.Next() {
 		var p models.Photo
-		if err := rows.Scan(&p.ID, &p.FolderID, &p.Filename, &p.Path, &p.Title, &p.Hidden, &p.Width, &p.Height); err != nil {
+		if err := rows.Scan(&p.ID, &p.FolderID, &p.Filename, &p.Path, &p.Title, &p.Hidden, &p.Width, &p.Height, &p.EditHash); err != nil {
 			continue
 		}
 		photos = append(photos, p)
@@ -955,12 +1039,12 @@ func (h *Handlers) adminEditPhoto(w http.ResponseWriter, r *http.Request) {
 	var photo models.Photo
 	err := h.db.Pool().QueryRow(ctx,
 		`SELECT id, folder_id, filename, path, COALESCE(url_path, ''), title, description, note, 
-		width, height, size_bytes, exif_data, hidden, created_at, taken_at 
+		width, height, size_bytes, exif_data, hidden, created_at, taken_at, COALESCE(edit_hash, '')
 		FROM photos WHERE id = $1`, id).
 		Scan(&photo.ID, &photo.FolderID, &photo.Filename, &photo.Path, &photo.URLPath,
 			&photo.Title, &photo.Description, &photo.Note,
 			&photo.Width, &photo.Height, &photo.SizeBytes,
-			&photo.ExifData, &photo.Hidden, &photo.CreatedAt, &photo.TakenAt)
+			&photo.ExifData, &photo.Hidden, &photo.CreatedAt, &photo.TakenAt, &photo.EditHash)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -1349,6 +1433,12 @@ type responseWriter struct {
 	status int
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer, e.g. to
+// extend the write deadline for large export downloads.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
@@ -1358,12 +1448,12 @@ func (h *Handlers) getPhotoByID(ctx context.Context, id int) (*models.Photo, err
 	var photo models.Photo
 	err := h.db.Pool().QueryRow(ctx,
 		`SELECT id, folder_id, filename, path, COALESCE(url_path, ''), title, description, note, 
-		width, height, size_bytes, blurhash, exif_data, hidden, created_at, taken_at 
+		width, height, size_bytes, blurhash, exif_data, hidden, created_at, taken_at, COALESCE(edit_hash, '')
 		FROM photos WHERE id = $1 AND hidden = false`, id).
 		Scan(&photo.ID, &photo.FolderID, &photo.Filename, &photo.Path, &photo.URLPath,
 			&photo.Title, &photo.Description, &photo.Note,
 			&photo.Width, &photo.Height, &photo.SizeBytes, &photo.Blurhash,
-			&photo.ExifData, &photo.Hidden, &photo.CreatedAt, &photo.TakenAt)
+			&photo.ExifData, &photo.Hidden, &photo.CreatedAt, &photo.TakenAt, &photo.EditHash)
 	return &photo, err
 }
 
@@ -1371,12 +1461,12 @@ func (h *Handlers) getPhotoByURLPath(ctx context.Context, urlPath string) (*mode
 	var photo models.Photo
 	err := h.db.Pool().QueryRow(ctx,
 		`SELECT id, folder_id, filename, path, url_path, title, description, note, 
-		width, height, size_bytes, blurhash, exif_data, hidden, created_at, taken_at 
+		width, height, size_bytes, blurhash, exif_data, hidden, created_at, taken_at, COALESCE(edit_hash, '')
 		FROM photos WHERE url_path = $1 AND hidden = false`, urlPath).
 		Scan(&photo.ID, &photo.FolderID, &photo.Filename, &photo.Path, &photo.URLPath,
 			&photo.Title, &photo.Description, &photo.Note,
 			&photo.Width, &photo.Height, &photo.SizeBytes, &photo.Blurhash,
-			&photo.ExifData, &photo.Hidden, &photo.CreatedAt, &photo.TakenAt)
+			&photo.ExifData, &photo.Hidden, &photo.CreatedAt, &photo.TakenAt, &photo.EditHash)
 	return &photo, err
 }
 
@@ -1483,9 +1573,10 @@ func (h *Handlers) getFoldersWithCounts(ctx context.Context, where string) ([]mo
 			(SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE folder_id = f.id AND hidden = false) as total_size,
 			(SELECT MAX(COALESCE(p.taken_at, p.created_at)) FROM photos p WHERE p.folder_id = f.id AND p.hidden = false) as latest_photo_at,
 			(SELECT ARRAY(
-				SELECT p.id FROM photos p WHERE p.folder_id = f.id AND p.hidden = false
+				SELECT '/thumb/small/' || p.id || COALESCE('?v=' || p.edit_hash, '')
+				FROM photos p WHERE p.folder_id = f.id AND p.hidden = false
 				ORDER BY COALESCE(p.taken_at, p.created_at) DESC, p.id DESC LIMIT 4
-			)) as preview_ids
+			)) as preview_urls
 		FROM folders f WHERE %s ORDER BY latest_photo_at DESC NULLS LAST, lower(f.name)`, where)
 
 	rows, err := h.db.Pool().Query(ctx, query)
@@ -1497,15 +1588,12 @@ func (h *Handlers) getFoldersWithCounts(ctx context.Context, where string) ([]mo
 	var folders []models.Folder
 	for rows.Next() {
 		var f models.Folder
-		var previewIDs []int64
+		var previewURLs []string
 		if err := rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path, &f.CoverPhotoID, &f.CreatedAt,
-			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &f.LatestPhoto, &previewIDs); err != nil {
+			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &f.LatestPhoto, &previewURLs); err != nil {
 			continue
 		}
-
-		for _, pid := range previewIDs {
-			f.PreviewURLs = append(f.PreviewURLs, fmt.Sprintf("/thumb/small/%d", pid))
-		}
+		f.PreviewURLs = previewURLs
 		if len(f.PreviewURLs) > 0 {
 			f.CoverURL = f.PreviewURLs[0]
 		}
@@ -1524,7 +1612,8 @@ func (h *Handlers) getFolderPhotos(ctx context.Context, folderID int) ([]models.
 
 func (h *Handlers) getPhotos(ctx context.Context, where string) ([]models.Photo, error) {
 	query := fmt.Sprintf(`
-		SELECT id, folder_id, filename, path, COALESCE(url_path, ''), title, width, height, blurhash, size_bytes, taken_at, created_at
+		SELECT id, folder_id, filename, path, COALESCE(url_path, ''), title, width, height, blurhash, size_bytes,
+		       taken_at, created_at, COALESCE(edit_hash, '')
 		FROM photos WHERE %s ORDER BY COALESCE(taken_at, created_at) DESC, id DESC`, where)
 
 	rows, err := h.db.Pool().Query(ctx, query)
@@ -1536,7 +1625,7 @@ func (h *Handlers) getPhotos(ctx context.Context, where string) ([]models.Photo,
 	var photos []models.Photo
 	for rows.Next() {
 		var p models.Photo
-		if err := rows.Scan(&p.ID, &p.FolderID, &p.Filename, &p.Path, &p.URLPath, &p.Title, &p.Width, &p.Height, &p.Blurhash, &p.SizeBytes, &p.TakenAt, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.FolderID, &p.Filename, &p.Path, &p.URLPath, &p.Title, &p.Width, &p.Height, &p.Blurhash, &p.SizeBytes, &p.TakenAt, &p.CreatedAt, &p.EditHash); err != nil {
 			continue
 		}
 		photos = append(photos, p)
@@ -1575,8 +1664,9 @@ func (h *Handlers) getFolderTree(ctx context.Context) ([]models.Folder, error) {
 			(SELECT COUNT(*) FROM photos WHERE folder_id = ft.id AND hidden = false),
 			(SELECT COUNT(*) FROM folders WHERE parent_id = ft.id),
 			(SELECT COALESCE(SUM(size_bytes), 0) FROM photos WHERE folder_id = ft.id AND hidden = false),
-			COALESCE(ft.cover_photo_id, (SELECT p.id FROM photos p WHERE p.folder_id = ft.id AND p.hidden = false 
-				ORDER BY COALESCE(p.taken_at, p.created_at) DESC, p.id DESC LIMIT 1))
+			(SELECT '/thumb/small/' || c.id || COALESCE('?v=' || c.edit_hash, '') FROM photos c
+			 WHERE c.id = COALESCE(ft.cover_photo_id, (SELECT p.id FROM photos p WHERE p.folder_id = ft.id AND p.hidden = false
+				ORDER BY COALESCE(p.taken_at, p.created_at) DESC, p.id DESC LIMIT 1)))
 		FROM folder_tree ft ORDER BY ft.path`
 
 	rows, err := h.db.Pool().Query(ctx, query)
@@ -1588,13 +1678,13 @@ func (h *Handlers) getFolderTree(ctx context.Context) ([]models.Folder, error) {
 	var folders []models.Folder
 	for rows.Next() {
 		var f models.Folder
-		var firstPhotoID sql.NullInt64
+		var cover sql.NullString
 		if err := rows.Scan(&f.ID, &f.ParentID, &f.Name, &f.Path, &f.CoverPhotoID, &f.CreatedAt, &f.Depth,
-			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &firstPhotoID); err != nil {
+			&f.PhotoCount, &f.SubfolderCount, &f.TotalSize, &cover); err != nil {
 			continue
 		}
-		if firstPhotoID.Valid {
-			f.CoverURL = fmt.Sprintf("/thumb/small/%d", firstPhotoID.Int64)
+		if cover.Valid {
+			f.CoverURL = cover.String
 		}
 		f.HasChildren = f.SubfolderCount > 0
 		folders = append(folders, f)
@@ -1846,7 +1936,7 @@ func (h *Handlers) apiListPhotos(w http.ResponseWriter, r *http.Request) {
 	folderFilter := r.URL.Query().Get("folder_id")
 
 	query := `SELECT id, folder_id, filename, path, COALESCE(url_path, ''), title, description,
-		width, height, size_bytes, blurhash, hidden, created_at, taken_at
+		width, height, size_bytes, blurhash, hidden, created_at, taken_at, COALESCE(edit_hash, '')
 		FROM photos WHERE hidden = false`
 	countQuery := "SELECT COUNT(*) FROM photos WHERE hidden = false"
 
@@ -1911,9 +2001,10 @@ func (h *Handlers) apiListPhotos(w http.ResponseWriter, r *http.Request) {
 		var createdAt time.Time
 		var takenAt sql.NullTime
 		var hidden bool
+		var editHash string
 
 		if err := rows.Scan(&p.ID, &folderID, &p.Filename, &p.Path, &urlPath, &title, &description,
-			&p.Width, &p.Height, &p.SizeBytes, &blurhash, &hidden, &createdAt, &takenAt); err != nil {
+			&p.Width, &p.Height, &p.SizeBytes, &blurhash, &hidden, &createdAt, &takenAt, &editHash); err != nil {
 			continue
 		}
 
@@ -1940,9 +2031,9 @@ func (h *Handlers) apiListPhotos(w http.ResponseWriter, r *http.Request) {
 			t := takenAt.Time.Format(time.RFC3339)
 			p.TakenAt = &t
 		}
-		p.Thumbnails.Small = fmt.Sprintf("/thumb/small/%d", p.ID)
-		p.Thumbnails.Medium = fmt.Sprintf("/thumb/medium/%d", p.ID)
-		p.Thumbnails.Large = fmt.Sprintf("/thumb/large/%d", p.ID)
+		p.Thumbnails.Small = versionedURL(fmt.Sprintf("/thumb/small/%d", p.ID), editHash)
+		p.Thumbnails.Medium = versionedURL(fmt.Sprintf("/thumb/medium/%d", p.ID), editHash)
+		p.Thumbnails.Large = versionedURL(fmt.Sprintf("/thumb/large/%d", p.ID), editHash)
 
 		photos = append(photos, p)
 	}
@@ -1978,13 +2069,14 @@ func (h *Handlers) apiGetPhoto(w http.ResponseWriter, r *http.Request) {
 	var hidden bool
 	var createdAt time.Time
 	var takenAt sql.NullTime
+	var editHash string
 
 	err = h.db.Pool().QueryRow(ctx, `
 		SELECT id, folder_id, filename, path, COALESCE(url_path, ''), title, description, note,
-			width, height, size_bytes, blurhash, exif_data, hidden, created_at, taken_at
+			width, height, size_bytes, blurhash, exif_data, hidden, created_at, taken_at, COALESCE(edit_hash, '')
 		FROM photos WHERE id = $1 AND hidden = false`, id).
 		Scan(&id, &folderID, &filename, &path, &urlPath, &title, &description, &note,
-			&width, &height, &sizeBytes, &blurhash, &exifData, &hidden, &createdAt, &takenAt)
+			&width, &height, &sizeBytes, &blurhash, &exifData, &hidden, &createdAt, &takenAt, &editHash)
 
 	if err != nil {
 		http.NotFound(w, r)
@@ -2007,11 +2099,11 @@ func (h *Handlers) apiGetPhoto(w http.ResponseWriter, r *http.Request) {
 		"created_at":  createdAt.Format(time.RFC3339),
 		"taken_at":    nil,
 		"thumbnails": map[string]string{
-			"small":  fmt.Sprintf("/thumb/small/%d", id),
-			"medium": fmt.Sprintf("/thumb/medium/%d", id),
-			"large":  fmt.Sprintf("/thumb/large/%d", id),
+			"small":  versionedURL(fmt.Sprintf("/thumb/small/%d", id), editHash),
+			"medium": versionedURL(fmt.Sprintf("/thumb/medium/%d", id), editHash),
+			"large":  versionedURL(fmt.Sprintf("/thumb/large/%d", id), editHash),
 		},
-		"original": fmt.Sprintf("/original/%d", id),
+		"original": versionedURL(fmt.Sprintf("/original/%d", id), editHash),
 	}
 
 	if folderID.Valid {
@@ -2277,7 +2369,7 @@ func (h *Handlers) folderOGCard(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	rows, err := h.db.Pool().Query(ctx,
-		`SELECT id, path, COALESCE(rotation, 0) FROM photos WHERE folder_id = $1 AND hidden = false
+		`SELECT id, path, COALESCE(rotation, 0), COALESCE(edit_hash, '') FROM photos WHERE folder_id = $1 AND hidden = false
 		ORDER BY COALESCE(taken_at, created_at) DESC, id DESC LIMIT 4`, folderID)
 	if err != nil {
 		http.NotFound(w, r)
@@ -2288,16 +2380,21 @@ func (h *Handlers) folderOGCard(w http.ResponseWriter, r *http.Request) {
 		id       int
 		path     string
 		rotation int
+		hash     string
 	}
 	var photos []ph
 	var keyParts []string
 	for rows.Next() {
 		var p ph
-		if err := rows.Scan(&p.id, &p.path, &p.rotation); err != nil {
+		if err := rows.Scan(&p.id, &p.path, &p.rotation, &p.hash); err != nil {
 			continue
 		}
 		photos = append(photos, p)
-		keyParts = append(keyParts, strconv.Itoa(p.id))
+		key := strconv.Itoa(p.id)
+		if p.hash != "" {
+			key += "." + p.hash
+		}
+		keyParts = append(keyParts, key)
 	}
 	rows.Close()
 
@@ -2345,9 +2442,13 @@ func (h *Handlers) folderOGCard(w http.ResponseWriter, r *http.Request) {
 
 		canvas := imaging.New(cw, chh, color.NRGBA{R: 18, G: 18, B: 18, A: 255})
 		for i, p := range photos {
-			thumbPath, err := h.thumbSvc.GetThumbnailPathByID(p.id, p.path, "medium", p.rotation)
-			if err != nil {
-				continue
+			thumbPath, ok := h.publishedFile(p.id, p.hash, "medium.jpg")
+			if !ok {
+				var terr error
+				thumbPath, terr = h.thumbSvc.GetThumbnailPathByID(p.id, p.path, "medium", p.rotation)
+				if terr != nil {
+					continue
+				}
 			}
 			img, err := imaging.Open(thumbPath)
 			if err != nil {

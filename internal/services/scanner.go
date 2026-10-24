@@ -186,7 +186,9 @@ func (s *ScannerService) processPhoto(ctx context.Context, relPath string, folde
 }
 
 func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
-	rows, err := s.db.Pool().Query(ctx, "SELECT id, path, COALESCE(rotation, 0) FROM photos ORDER BY id")
+	rows, err := s.db.Pool().Query(ctx, `
+		SELECT p.id, p.path, COALESCE(p.rotation, 0), (e.photo_id IS NOT NULL)
+		FROM photos p LEFT JOIN photo_edits e ON e.photo_id = p.id ORDER BY p.id`)
 	if err != nil {
 		return err
 	}
@@ -196,11 +198,12 @@ func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
 		id       int
 		path     string
 		rotation int
+		edited   bool
 	}
 	var photos []photoRow
 	for rows.Next() {
 		var p photoRow
-		if err := rows.Scan(&p.id, &p.path, &p.rotation); err != nil {
+		if err := rows.Scan(&p.id, &p.path, &p.rotation, &p.edited); err != nil {
 			continue
 		}
 		photos = append(photos, p)
@@ -216,11 +219,7 @@ func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
 			continue
 		}
 
-		rotation := NormalizeRotation(p.rotation)
-
 		exifInfo, takenAt, _ := s.exifSvc.Extract(absPath)
-		width, height, _ := s.thumbSvc.GetImageDimensions(p.path, rotation)
-		blurhash, _ := s.thumbSvc.GenerateBlurhash(p.path, rotation)
 
 		var exifJSON []byte
 		if exifInfo != nil {
@@ -231,6 +230,21 @@ func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
 		if !takenAt.IsZero() {
 			takenAtPtr = &takenAt
 		}
+
+		// Edited photos take width/height/blurhash from the develop engine's
+		// published render; recomputing them from the source would revert it.
+		if p.edited {
+			if _, err := s.db.Pool().Exec(ctx,
+				`UPDATE photos SET exif_data = $1, taken_at = COALESCE($2, taken_at), updated_at = NOW() WHERE id = $3`,
+				exifJSON, takenAtPtr, p.id); err != nil {
+				log.Printf("reprocess error photo %d (%s): %v", p.id, p.path, err)
+			}
+			continue
+		}
+
+		rotation := NormalizeRotation(p.rotation)
+		width, height, _ := s.thumbSvc.GetImageDimensions(p.path, rotation)
+		blurhash, _ := s.thumbSvc.GenerateBlurhash(p.path, rotation)
 
 		_, err := s.db.Pool().Exec(ctx,
 			`UPDATE photos SET 
@@ -445,6 +459,7 @@ func (s *ScannerService) DedupPhotos(ctx context.Context) error {
 			if _, ok := seen[sum]; ok {
 				_, _ = s.db.Pool().Exec(ctx, "DELETE FROM photos WHERE id = $1", it.id)
 				_ = s.thumbSvc.DeleteThumbnailsByID(it.id)
+				_ = os.RemoveAll(s.thumbSvc.DevelopDir(it.id))
 				_ = os.Remove(filepath.Join(s.mediaRoot, it.path))
 				log.Printf("dedup removed duplicate photo %d (%s)", it.id, it.path)
 			} else {

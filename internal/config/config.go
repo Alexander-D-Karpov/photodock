@@ -4,17 +4,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	DatabaseURL string
-	MediaRoot   string
-	CacheDir    string
-	ListenAddr  string
-	AdminUser   string
-	AdminPass   string
+	DatabaseURL           string
+	MediaRoot             string
+	CacheDir              string
+	ListenAddr            string
+	AdminUser             string
+	AdminPass             string
+	DevelopProxySize      int
+	DevelopPreviewWorkers int
+	LensfunDir            string
 }
 
 func Load() (*Config, error) {
@@ -59,11 +63,22 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		DatabaseURL: dbURL,
-		MediaRoot:   mediaRootAbs,
-		CacheDir:    cacheDirAbs,
-		ListenAddr:  listenAddr,
-		AdminUser:   adminUser,
-		AdminPass:   adminPass,
+		DatabaseURL:           dbURL,
+		MediaRoot:             mediaRootAbs,
+		CacheDir:              cacheDirAbs,
+		ListenAddr:            listenAddr,
+		AdminUser:             adminUser,
+		AdminPass:             adminPass,
+		DevelopProxySize:      envInt("DEVELOP_PROXY_SIZE", 2048),
+		DevelopPreviewWorkers: envInt("DEVELOP_PREVIEW_WORKERS", 2),
+		LensfunDir:            os.Getenv("LENSFUN_DB"),
 	}, nil
+}
+
+func envInt(key string, def int) int {
+	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
 }
