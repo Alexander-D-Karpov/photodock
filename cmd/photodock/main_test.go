@@ -117,7 +117,7 @@ func TestTemplatesExecuteWithEditHash(t *testing.T) {
 			continue
 		}
 		out := buf.String()
-		if name == "public/photo.html" && (!strings.Contains(out, "Lens corrected") || !strings.Contains(out, "unedited=1")) {
+		if name == "public/photo.html" && (!strings.Contains(out, "Development") || !strings.Contains(out, "Lens correction") || !strings.Contains(out, "unedited=1")) {
 			t.Errorf("photo page is missing the develop summary")
 		}
 		if name != "admin/photo_edit.html" && !strings.Contains(out, "?v="+hash) {

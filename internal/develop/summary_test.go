@@ -1,9 +1,6 @@
 package develop
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestSummarizeNeutralIsNil(t *testing.T) {
 	if Summarize(Recipe{WB: WBParams{Mode: WBAsShot}}) != nil {
@@ -40,12 +37,6 @@ func TestSummarizeListsModules(t *testing.T) {
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("%s = %q; want %q", k, got[k], v)
-		}
-	}
-	chips := strings.Join(s.Chips, "|")
-	for _, c := range []string{"6900 K", "+0.45 EV", "B&W", "Lens corrected", "Cropped"} {
-		if !strings.Contains(chips, c) {
-			t.Errorf("chip %q missing from %v", c, s.Chips)
 		}
 	}
 }

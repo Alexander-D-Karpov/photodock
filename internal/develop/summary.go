@@ -7,11 +7,10 @@ import (
 	"strings"
 )
 
-// Summary describes a recipe for the public photo page: a few headline chips
-// and one row per module that changes the image.
+// Summary describes a recipe for the public photo page: one row per module
+// that changes the image.
 type Summary struct {
-	Chips []string
-	Rows  []SummaryRow
+	Rows []SummaryRow
 }
 
 type SummaryRow struct {
@@ -65,11 +64,9 @@ func Summarize(r Recipe) *Summary {
 			wb += ", tint " + signedInt(r.WB.Tint)
 		}
 		add("White balance", wb)
-		s.Chips = append(s.Chips, fmt.Sprintf("%.0f K", r.WB.Temp))
 	}
 	if r.Tone.Exposure != 0 {
 		add("Exposure", signedEV(r.Tone.Exposure))
-		s.Chips = append(s.Chips, signedEV(r.Tone.Exposure))
 	}
 	t := r.Tone
 	add("Tone", joinNonZero("Contrast", t.Contrast, "Highlights", t.Highlights, "Shadows", t.Shadows, "Whites", t.Whites, "Blacks", t.Blacks))
@@ -102,11 +99,9 @@ func Summarize(r Recipe) *Summary {
 	}
 	if len(wheels) > 0 {
 		add("Color grading", strings.Join(wheels, ", "))
-		s.Chips = append(s.Chips, "Graded")
 	}
 	if c.BW.Enabled {
 		add("Black & white", "Converted")
-		s.Chips = append(s.Chips, "B&W")
 	}
 	if c.Mixer != (Mixer{}) {
 		add("Channel mixer", "Adjusted")
@@ -126,14 +121,12 @@ func Summarize(r Recipe) *Summary {
 			name = lensProfileName(r.Lens.Profile)
 		}
 		add("Lens correction", name)
-		s.Chips = append(s.Chips, "Lens corrected")
 	}
 
 	geo := r.Geometry
 	var gparts []string
 	if geo.Crop != nil {
 		gparts = append(gparts, "cropped")
-		s.Chips = append(s.Chips, "Cropped")
 	}
 	if geo.Angle != 0 {
 		gparts = append(gparts, fmt.Sprintf("straightened %+.1f°", geo.Angle))
@@ -157,7 +150,6 @@ func Summarize(r Recipe) *Summary {
 			label = fmt.Sprintf("%d local adjustments", active)
 		}
 		add("Masks", label)
-		s.Chips = append(s.Chips, label)
 	}
 	if len(s.Rows) == 0 {
 		return nil
