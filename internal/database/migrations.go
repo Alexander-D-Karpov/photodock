@@ -140,6 +140,8 @@ func (db *DB) Migrate() error {
 
 	ALTER TABLE staged_uploads ADD COLUMN IF NOT EXISTS edit_rev BIGINT NOT NULL DEFAULT 0;
 
+	ALTER TABLE photo_edits ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0;
+
 	CREATE TABLE IF NOT EXISTS staged_edits (
 		staged_id TEXT PRIMARY KEY REFERENCES staged_uploads(id) ON DELETE CASCADE,
 		recipe JSONB NOT NULL,

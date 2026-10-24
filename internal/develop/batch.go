@@ -133,7 +133,7 @@ func (e *Engine) ApplyBatch(ctx context.Context, ids []int, patch Recipe, module
 					res.Unchanged++
 					continue
 				}
-				err = e.saveRecipe(ctx, id, merged, rev, label)
+				err = e.saveRecipe(ctx, id, merged, rev, label, false)
 			}
 		}
 		if err != nil {

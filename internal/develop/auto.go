@@ -111,7 +111,7 @@ func (e *Engine) autoOne(id int, opts AutoOptions) error {
 	if sameRecipe(cur, merged) {
 		return nil
 	}
-	return e.saveRecipe(ctx, id, merged, rev, "Auto")
+	return e.saveRecipe(ctx, id, merged, rev, "Auto", false)
 }
 
 func (e *Engine) autoSource(ctx context.Context, src *Source, resolved Recipe, opts AutoOptions) (*AutoResult, error) {

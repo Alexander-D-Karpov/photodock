@@ -335,7 +335,7 @@ func (e *Engine) State(ctx context.Context, id int) (*State, error) {
 }
 
 func (e *Engine) Save(ctx context.Context, id int, rec Recipe, expected int64, label string) (*State, error) {
-	if err := e.saveRecipe(ctx, id, rec, expected, label); err != nil {
+	if err := e.saveRecipe(ctx, id, rec, expected, label, true); err != nil {
 		return nil, err
 	}
 	e.kick()
@@ -437,7 +437,7 @@ func (e *Engine) processNext(ctx context.Context) (bool, error) {
 	err := e.db.Pool().QueryRow(ctx, `
 		SELECT photo_id, recipe, defaults_version, desired_hash, render_attempts FROM photo_edits
 		WHERE published_hash IS DISTINCT FROM desired_hash AND render_state = 'queued' AND next_attempt_at <= NOW()
-		ORDER BY updated_at LIMIT 1`).Scan(&id, &raw, &dv, &hash, &attempts)
+		ORDER BY priority DESC, updated_at LIMIT 1`).Scan(&id, &raw, &dv, &hash, &attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -1345,7 +1345,13 @@ func (e *Engine) renderLinear(ctx context.Context, src *Source, r Recipe) (*Imag
 
 // saveRecipe stores a new revision of a photo's recipe and queues a render
 // when the hash changed. expected is the revision the caller edited.
-func (e *Engine) saveRecipe(ctx context.Context, id int, rec Recipe, expected int64, label string) error {
+// Interactive saves (the editor) render ahead of batch work, so a long batch
+// never leaves the photo someone is editing stuck in the queue.
+func (e *Engine) saveRecipe(ctx context.Context, id int, rec Recipe, expected int64, label string, interactive bool) error {
+	priority := 0
+	if interactive {
+		priority = 1
+	}
 	rec, err := rec.Normalize()
 	if err != nil {
 		return err
@@ -1398,14 +1404,14 @@ func (e *Engine) saveRecipe(ctx context.Context, id int, rec Recipe, expected in
 		_, err = tx.Exec(ctx, `
 			UPDATE photo_edits SET recipe = $2, recipe_revision = recipe_revision + 1, desired_hash = $3,
 				render_state = CASE WHEN published_hash IS NOT DISTINCT FROM $3 THEN 'idle' ELSE 'queued' END,
-				render_error = NULL, render_attempts = 0, next_attempt_at = NOW(), updated_at = NOW()
-			WHERE photo_id = $1`, id, recipeJSON, hash)
+				render_error = NULL, render_attempts = 0, next_attempt_at = NOW(), updated_at = NOW(), priority = $4
+			WHERE photo_id = $1`, id, recipeJSON, hash, priority)
 	} else {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO photo_edits (photo_id, recipe, defaults_version, recipe_revision, desired_hash,
-				source_width, source_height, source_blurhash, legacy_rotation, render_state)
-			VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, 'queued')`,
-			id, recipeJSON, dv, hash, p.Width, p.Height, p.Blurhash, p.Rotation)
+				source_width, source_height, source_blurhash, legacy_rotation, render_state, priority)
+			VALUES ($1, $2, $3, 1, $4, $5, $6, $7, $8, 'queued', $9)`,
+			id, recipeJSON, dv, hash, p.Width, p.Height, p.Blurhash, p.Rotation, priority)
 	}
 	if err != nil {
 		return err
