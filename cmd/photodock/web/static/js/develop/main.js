@@ -787,7 +787,29 @@ function imageBox() {
     return { left: i.left - s.left, top: i.top - s.top, width: i.width, height: i.height };
 }
 
+// fitImage sizes the fit preview explicitly to "contain" the stage, so a
+// reduced-resolution drag frame occupies the same box as a final frame
+// instead of shrinking to its natural size.
+function fitImage() {
+    const img = els.image;
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    const cs = getComputedStyle(els.stage);
+    const aw = els.stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const ah = els.stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    if (aw <= 0 || ah <= 0) return;
+    const ar = img.naturalWidth / img.naturalHeight;
+    let w = aw;
+    let h = aw / ar;
+    if (h > ah) {
+        h = ah;
+        w = ah * ar;
+    }
+    img.style.width = `${Math.floor(w)}px`;
+    img.style.height = `${Math.floor(h)}px`;
+}
+
 function layoutOverlays() {
+    fitImage();
     const b = imageBox();
     for (const el of [els.clipmask, els.crop]) {
         Object.assign(el.style, { left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
@@ -1047,7 +1069,10 @@ async function init() {
         const st = await api.state(app.id);
         applyState(st, true);
         if (st.source.available) refreshPreview();
-        else if (!cfg.staged) els.image.src = `/thumb/large/${app.id}`;
+        else if (!cfg.staged) {
+            els.image.addEventListener('load', layoutOverlays, { once: true });
+            els.image.src = `/thumb/large/${app.id}`;
+        }
         loadHistory();
         schedulePoll();
     } catch (err) {

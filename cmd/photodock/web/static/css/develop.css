@@ -83,7 +83,7 @@ body.dv > .dv-strip { grid-row: 4; }
 .dv-error { padding: 8px 14px; background: rgba(239, 68, 68, .15); color: #fca5a5; border-bottom: 1px solid rgba(239, 68, 68, .4); }
 .dv-error.warn { background: rgba(245, 158, 11, .12); color: #fcd34d; border-color: rgba(245, 158, 11, .35); }
 
-.dv-body { display: grid; grid-template-columns: 220px minmax(0, 1fr) 320px; min-height: 0; }
+.dv-body { display: grid; grid-template-columns: 220px minmax(0, 1fr) 340px; min-height: 0; }
 body.dv-hide-panels .dv-body { grid-template-columns: minmax(0, 1fr); }
 body.dv-hide-panels .dv-left, body.dv-hide-panels .dv-right { display: none; }
 
@@ -198,8 +198,9 @@ body.dv-hide-panels .dv-left, body.dv-hide-panels .dv-right { display: none; }
 .dv-clip-hi { right: 16px; border-top-color: #ff4f4f; border-right-color: #ff4f4f; }
 .dv-clip-ind.on { opacity: 1; }
 
-.dv-tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--dv-border); }
-.dv-tabs .dv-btn { background: none; border-bottom: 0; border-radius: 6px 6px 0 0; }
+/* Tabs share the row and wrap rather than overflow when the panel is narrow. */
+.dv-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--dv-border); }
+.dv-tabs .dv-btn { flex: 1 1 auto; justify-content: center; padding: 5px 8px; background: none; border-bottom: 0; border-radius: 6px 6px 0 0; }
 .dv-tabs .dv-btn.active { background: var(--dv-panel-2); box-shadow: none; }
 
 .dv-module { border-bottom: 1px solid var(--dv-border); }
