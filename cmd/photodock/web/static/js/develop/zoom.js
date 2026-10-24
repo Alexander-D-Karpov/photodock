@@ -1,9 +1,12 @@
 // ZoomView shows a full-resolution region at one image pixel per device pixel
 // and pans it by dragging; a release asks for the newly exposed region.
+// The fit preview (backdrop) stays visible, scaled to the same position, so
+// the photo never disappears while a region decodes or after a pan.
 export class ZoomView {
-    constructor(stage, img) {
+    constructor(stage, img, backdrop) {
         this.stage = stage;
         this.img = img;
+        this.backdrop = backdrop;
         this.active = false;
         this.cx = 0.5;
         this.cy = 0.5;
@@ -37,6 +40,7 @@ export class ZoomView {
         this.region = null;
         this.stage.classList.add('zoomed');
         this.img.hidden = true;
+        this.layout();
     }
 
     exit() {
@@ -45,6 +49,7 @@ export class ZoomView {
         this.drag = null;
         this.stage.classList.remove('zoomed');
         this.img.hidden = true;
+        if (this.backdrop) this.backdrop.style.transform = '';
     }
 
     span() {
@@ -74,9 +79,25 @@ export class ZoomView {
         this.layout();
     }
 
+    // layoutBackdrop scales the fit preview so the point (cx, cy) sits at the
+    // stage centre at 1:1 scale, matching where the sharp region will land.
+    layoutBackdrop(r) {
+        const b = this.backdrop;
+        if (!b || !b.offsetWidth || !this.fullW) return;
+        const w = b.offsetWidth;
+        const h = b.offsetHeight;
+        const k = this.fullW / this.dpr / w;
+        const tx = r.width / 2 - b.offsetLeft - k * this.cx * w;
+        const ty = r.height / 2 - b.offsetTop - k * this.cy * h;
+        b.style.transformOrigin = '0 0';
+        b.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
+    }
+
     layout() {
-        if (!this.active || !this.region) return;
+        if (!this.active) return;
         const r = this.stage.getBoundingClientRect();
+        this.layoutBackdrop(r);
+        if (!this.region) return;
         const s = 1 / this.dpr;
         Object.assign(this.img.style, {
             width: `${this.region.w * this.fullW * s}px`,

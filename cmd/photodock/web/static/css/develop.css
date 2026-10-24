@@ -282,7 +282,9 @@ body.dv-hide-panels .dv-left, body.dv-hide-panels .dv-right { display: none; }
 
 .dv-stage.zoomed { cursor: grab; }
 .dv-stage.zoomed:active { cursor: grabbing; }
-.dv-stage.zoomed #dv-image, .dv-stage.zoomed .dv-clipmask { visibility: hidden; }
+.dv-stage.zoomed .dv-clipmask { visibility: hidden; }
+/* The fit preview is only a scaled backdrop while zoomed; taps go to the stage. */
+.dv-stage.zoomed #dv-image { box-shadow: none; pointer-events: none; }
 .dv-stage img.dv-zoom-img {
     position: absolute;
     max-width: none;
