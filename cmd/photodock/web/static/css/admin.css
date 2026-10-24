@@ -1063,3 +1063,31 @@ a:hover { text-decoration: underline; }
     background: var(--success);
     border-radius: 4px;
 }
+
+/* Develop shortcut on Unsorted tiles, next to the remove button. */
+.upload-preview-item .develop-btn {
+    position: absolute;
+    top: 8px;
+    right: 46px;
+    z-index: 6;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.upload-preview-item .develop-btn svg { width: 16px; height: 16px; color: #fff; }
+.upload-preview-item:hover .develop-btn { opacity: 1; }
+.upload-preview-item .develop-btn:hover { background: var(--accent); }
+
+@media (hover: none) {
+    .upload-preview-item .develop-btn { opacity: 1; }
+}

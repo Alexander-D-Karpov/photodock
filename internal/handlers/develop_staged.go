@@ -45,7 +45,8 @@ func (h *Handlers) adminDevelopStagedPage(w http.ResponseWriter, r *http.Request
 			"staged":   sid,
 			"filename": filename,
 			"strip":    strip,
-			"back":     "/admin",
+			// Back lands in Unsorted with this file reopened in the viewer.
+			"back": "/admin#staged=" + sid,
 		},
 	})
 }

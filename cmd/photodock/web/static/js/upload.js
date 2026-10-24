@@ -89,6 +89,7 @@
             isRaw: it.is_raw,
             rotation: it.rotation || 0,
             edited: !!it.edited,
+            editRev: it.edit_rev || 0,
             status: 'complete',
             progress: 100,
             previewUrl: it.preview_url,
@@ -108,6 +109,54 @@
             items = [];
         }
         render();
+        returnFromEditor();
+    }
+
+    // Coming back from the editor (#staged=<id>) reopens that file, and since
+    // edited previews re-render in the background, the list is refreshed a few
+    // times so the new previews replace the stale ones.
+    function returnFromEditor() {
+        const m = location.hash.match(/^#staged=([0-9]+-[0-9a-f]+)$/);
+        if (m) {
+            history.replaceState(null, '', location.pathname + location.search);
+            const item = items.find(i => i.id === m[1]);
+            if (item) openViewer(item.key);
+        }
+        if (m || items.some(i => i.edited)) {
+            [1500, 4000, 8000].forEach(ms => setTimeout(refreshStaged, ms));
+        }
+    }
+
+    async function refreshStaged() {
+        if (committing) return;
+        let data;
+        try {
+            const res = await fetch('/admin/staging', { cache: 'no-store' });
+            if (!res.ok) return;
+            data = await res.json();
+        } catch (e) {
+            return;
+        }
+        let changed = false;
+        (data.items || []).forEach(it => {
+            const item = items.find(i => i.id === it.id);
+            if (!item || (item.editRev === (it.edit_rev || 0) && item.edited === !!it.edited)) return;
+            Object.assign(item, {
+                width: it.width,
+                height: it.height,
+                rotation: it.rotation || 0,
+                edited: !!it.edited,
+                editRev: it.edit_rev || 0,
+                previewUrl: it.preview_url,
+                viewUrl: it.view_url,
+            });
+            changed = true;
+        });
+        if (changed) render();
+    }
+
+    function developURL(item) {
+        return '/admin/develop/staged/' + encodeURIComponent(item.id);
     }
 
     function alreadyStaged(file) {
@@ -345,6 +394,9 @@
         return badges +
             '<span class="status-badge" title="' + statusLabel(item) + '"></span>' +
             '<div class="preview-image-wrapper" style="height:' + h + 'px;">' + media + '</div>' +
+            (item.id && item.status === 'complete'
+                ? '<button class="develop-btn" type="button" title="Develop">' + ICON_DEVELOP + '</button>'
+                : '') +
             '<button class="remove-btn" type="button" title="Remove">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
             '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>' +
@@ -554,7 +606,7 @@
     function developCurrent() {
         const item = items[viewerIdx()];
         if (!item || !item.id || item.status !== 'complete' || committing) return;
-        window.location.href = '/admin/develop/staged/' + encodeURIComponent(item.id);
+        window.location.href = developURL(item);
     }
 
     async function deleteCurrent() {
@@ -609,6 +661,14 @@
         previewGrid.addEventListener('click', (e) => {
             const tile = e.target.closest('.upload-preview-item');
             if (!tile) return;
+            const dev = e.target.closest('.develop-btn');
+            if (dev) {
+                e.preventDefault();
+                e.stopPropagation();
+                const it = items.find(i => i.key === tile.dataset.key);
+                if (it && it.id && !committing) window.location.href = developURL(it);
+                return;
+            }
             const btn = e.target.closest('.remove-btn');
             if (btn) {
                 e.preventDefault();
