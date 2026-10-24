@@ -90,7 +90,7 @@ function stageSize(scale) {
 
 const histogram = new Histogram($('dv-histogram'), $('dv-clip-lo'), $('dv-clip-hi'));
 const crop = new CropTool(els.crop, els.image);
-const zoom = new ZoomView(els.stage, els.zoomImage);
+const zoom = new ZoomView(els.stage, els.zoomImage, els.image);
 const perf = new PerfHud($('dv-perf'));
 const mobileQuery = window.matchMedia('(max-width: 900px)');
 
