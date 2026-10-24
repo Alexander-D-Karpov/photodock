@@ -284,7 +284,7 @@ func (e *Engine) AdoptStaged(ctx context.Context, sid string, photoID int) error
 	if row.Recipe == nil {
 		return nil
 	}
-	if err := e.saveRecipe(ctx, photoID, *row.Recipe, 0, stagedAdoptLabel); err != nil {
+	if err := e.saveRecipe(ctx, photoID, *row.Recipe, 0, stagedAdoptLabel, true); err != nil {
 		return fmt.Errorf("adopt staged %s into photo %d: %w", sid, photoID, err)
 	}
 	e.kick()
