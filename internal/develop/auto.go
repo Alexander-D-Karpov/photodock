@@ -301,9 +301,13 @@ func autoWhiteBalance(img *Image, from [3]float64, asT, asTint, sceneKey float64
 	}
 	confidence := clamp((sceneKey-autoDarkKey)/(autoLowKey-autoDarkKey), autoWBMinConf, 1)
 	weight := autoWBBlend * confidence
+	// The cap scales with confidence too: ~30 mired (≈1600 K near 6500 K) for
+	// normal scenes, ~9 mired (≈400 K) for dusk and night.
+	miredLimit := autoWBMaxMired * confidence
+	tintLimit := autoWBMaxTint * confidence
 	asMired := 1e6 / asT
-	shift := clamp(weight*(1e6/got.Temp-asMired), -autoWBMaxMired, autoWBMaxMired)
-	tintShift := clamp(weight*(got.Tint-asTint), -autoWBMaxTint, autoWBMaxTint)
+	shift := clamp(weight*(1e6/got.Temp-asMired), -miredLimit, miredLimit)
+	tintShift := clamp(weight*(got.Tint-asTint), -tintLimit, tintLimit)
 	if math.Abs(shift) < autoWBMired && math.Abs(tintShift) < autoWBTint {
 		return keep, "White balance: camera value looks right"
 	}
