@@ -27,8 +27,8 @@ function initViewer(opts) {
     }
 
     // Prefetch neighbors (helps navigation feel instant)
-    if (opts.prevId) new Image().src = '/original/' + opts.prevId;
-    if (opts.nextId) new Image().src = '/original/' + opts.nextId;
+    if (opts.prevOriginal) new Image().src = opts.prevOriginal;
+    if (opts.nextOriginal) new Image().src = opts.nextOriginal;
 
     // Keyboard navigation
     document.addEventListener('keydown', (e) => {

@@ -43,7 +43,7 @@
             <div class="cover-grid">
                 {{range .Photos}}
                 <div class="cover-option {{if $.Folder.CoverPhotoID.Valid}}{{if eq $.Folder.CoverPhotoID.Int64 (int64 .ID)}}selected{{end}}{{end}}">
-                    <img src="/thumb/small/{{.ID}}" alt="" onclick="setCover({{$.Folder.ID}}, {{.ID}})">
+                    <img src="{{thumb "small" .ID .EditHash}}" alt="" onclick="setCover({{$.Folder.ID}}, {{.ID}})">
                 </div>
                 {{end}}
             </div>

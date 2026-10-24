@@ -1017,3 +1017,49 @@ a:hover { text-decoration: underline; }
     height: 18px;
     color: #fff;
 }
+.edited-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 5;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.75rem;
+}
+
+.module-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 14px;
+}
+
+.module-grid label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: normal;
+}
+
+.upload-preview-item .tile-badges {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 6;
+    display: flex;
+    gap: 4px;
+}
+
+.upload-preview-item .tile-badges .raw-badge {
+    position: static;
+}
+
+.upload-preview-item .edit-badge {
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #fff;
+    background: var(--success);
+    border-radius: 4px;
+}

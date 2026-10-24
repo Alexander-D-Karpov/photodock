@@ -49,6 +49,10 @@
             <span><strong id="selected-count">0</strong> selected</span>
             <button class="btn btn-small" onclick="bulkHide()">{{template "icon-eye-off"}} Hide</button>
             <button class="btn btn-small" onclick="bulkMove()">{{template "icon-folder-small"}} Move</button>
+            <button class="btn btn-small" onclick="batchAuto()">Auto</button>
+            <button class="btn btn-small" onclick="batchApplyPreset()">{{template "icon-develop"}} Apply preset</button>
+            <button class="btn btn-small" onclick="batchPaste()">Paste settings</button>
+            <button class="btn btn-small" onclick="batchResetEdits()">Reset edits</button>
             <button class="btn btn-small btn-danger" onclick="bulkDelete()">{{template "icon-trash"}} Delete</button>
         </div>
 
@@ -58,12 +62,14 @@
                 <div class="photo-select-wrapper">
                     <input type="checkbox" class="photo-select" data-id="{{.ID}}" onchange="togglePhotoSelect({{.ID}}, this)">
                 </div>
+                {{if .EditHash}}<span class="edited-badge" title="Edited">✎</span>{{end}}
                 <a href="/admin/photos/{{.ID}}">
-                    <img src="/thumb/small/{{.ID}}" alt="{{.Filename}}" loading="lazy">
+                    <img src="{{thumb "small" .ID .EditHash}}" alt="{{.Filename}}" loading="lazy">
                 </a>
                 <div class="photo-admin-info">
                     <span class="filename">{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}</span>
                     <div class="photo-admin-actions">
+                        <a class="btn-icon" href="/admin/develop/{{.ID}}" title="Develop">{{template "icon-develop"}}</a>
                         <button class="btn-icon" onclick="toggleHide({{.ID}})" title="{{if .Hidden}}Show{{else}}Hide{{end}}">
                             {{if .Hidden}}{{template "icon-eye"}}{{else}}{{template "icon-eye-off"}}{{end}}
                         </button>
@@ -105,8 +111,26 @@
             <button type="button" class="btn btn-primary" onclick="confirmBulkMove()">Move</button>
         </div>
     </dialog>
+
+    <dialog id="batch-dialog" class="admin-dialog">
+        <h2 id="batch-title">Apply to selected</h2>
+        <div class="form-group" id="batch-preset-wrap">
+            <label for="batch-preset">Preset</label>
+            <select id="batch-preset"></select>
+        </div>
+        <div class="form-group">
+            <label>Modules</label>
+            <div class="module-grid" id="batch-modules"></div>
+        </div>
+        <p class="upload-hint" id="batch-status"></p>
+        <div class="dialog-actions">
+            <button type="button" class="btn" id="batch-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="batch-ok">Apply</button>
+        </div>
+    </dialog>
 </div>
 <script src="{{asset "/static/js/admin.js"}}"></script>
+<script src="{{asset "/static/js/develop-batch.js"}}"></script>
 </body>
 </html>
 {{end}}

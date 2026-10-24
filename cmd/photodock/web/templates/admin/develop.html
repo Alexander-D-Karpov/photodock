@@ -1,0 +1,123 @@
+{{define "admin/develop.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{{.Title}} - PhotoDock</title>
+    <link rel="stylesheet" href="{{asset "/static/css/develop.css"}}">
+    <link rel="icon" type="image/webp" href="{{asset "/static/icon.webp"}}">
+    <script>
+        window.DEVELOP = {{.Config}};
+        (function () {
+            var s = document.createElement('script');
+            s.type = 'importmap';
+            s.textContent = JSON.stringify({{importMap "/static/js/develop/"}});
+            document.currentScript.after(s);
+        })();
+    </script>
+</head>
+<body class="dv">
+<header class="dv-top">
+    <div class="dv-top-left">
+        <button class="dv-btn" id="dv-back" type="button" title="Back (Esc)">{{template "icon-back"}}</button>
+        <button class="dv-btn" id="dv-prev" type="button" title="Previous (←)">{{template "icon-chevron-left"}}</button>
+        <span class="dv-name" id="dv-name"></span>
+        <span class="dv-counter" id="dv-counter"></span>
+        <button class="dv-btn" id="dv-next" type="button" title="Next (→)">{{template "icon-chevron-right"}}</button>
+    </div>
+    <div class="dv-top-center">
+        <button class="dv-btn primary" id="dv-auto" type="button" title="Auto (Shift+A)">Auto</button>
+        <button class="dv-btn" id="dv-undo" type="button" title="Undo (Ctrl+Z)">↶</button>
+        <button class="dv-btn" id="dv-redo" type="button" title="Redo (Ctrl+Shift+Z)">↷</button>
+        <button class="dv-btn" id="dv-before" type="button" title="Before / after (\)">Before</button>
+        <button class="dv-btn" id="dv-zoom-btn" type="button" title="100% view (Z or click the photo)">1:1</button>
+        <button class="dv-btn" id="dv-clip" type="button" title="Show clipping (J)">Clipping</button>
+        <button class="dv-btn" id="dv-copy" type="button" title="Copy settings (Ctrl+C)">Copy</button>
+        <button class="dv-btn" id="dv-paste" type="button" title="Paste settings (Ctrl+V)">Paste</button>
+        <button class="dv-btn danger" id="dv-reset" type="button" title="Discard all edits">Reset</button>
+    </div>
+    <div class="dv-top-right">
+        <span class="dv-pill" id="dv-recipe-status" title="Recipe"></span>
+        <span class="dv-pill" id="dv-publish-status" title="Public images"></span>
+        <button class="dv-btn" id="dv-export" type="button" title="Export (Ctrl+E)">Export</button>
+        <button class="dv-btn" id="dv-panels" type="button" title="Toggle panels (H)">Panels</button>
+    </div>
+</header>
+<div class="dv-error" id="dv-error" hidden></div>
+<div class="dv-body">
+    <aside class="dv-left">
+        <h3>History</h3>
+        <ol class="dv-history" id="dv-history"></ol>
+        <h3 class="dv-left-gap">Presets</h3>
+        <button class="dv-btn dv-grow" id="dv-preset-save" type="button">Save preset…</button>
+        <ul class="dv-presets" id="dv-presets"></ul>
+    </aside>
+    <main class="dv-stage" id="dv-stage">
+        <img id="dv-image" alt="">
+        <img id="dv-zoom" class="dv-zoom-img" alt="" hidden>
+        <canvas id="dv-clipmask" class="dv-clipmask" hidden></canvas>
+        <div class="dv-crop" id="dv-crop" hidden></div>
+        <canvas id="dv-maskweights" class="dv-maskweights" hidden></canvas>
+        <svg id="dv-masks" class="dv-masks" hidden xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="dv-badge" id="dv-quality" hidden>≈ approximate white balance</div>
+        <div class="dv-badge dv-badge-before" id="dv-before-badge" hidden>Before</div>
+        <div class="dv-spinner" id="dv-spinner" hidden></div>
+        <div class="dv-perf" id="dv-perf" hidden></div>
+    </main>
+    <aside class="dv-right">
+        <button class="dv-sheet-handle" id="dv-sheet-handle" type="button" aria-label="Toggle panel"></button>
+        <div class="dv-hist">
+            <canvas id="dv-histogram"></canvas>
+            <span class="dv-clip-ind dv-clip-lo" id="dv-clip-lo" title="Shadow clipping"></span>
+            <span class="dv-clip-ind dv-clip-hi" id="dv-clip-hi" title="Highlight clipping"></span>
+        </div>
+        <nav class="dv-tabs" id="dv-tabs"></nav>
+        <div id="dv-modules"></div>
+    </aside>
+</div>
+<footer class="dv-strip" id="dv-strip"></footer>
+<div class="dv-toast" id="dv-toast"></div>
+<dialog id="dv-conflict" class="dv-dialog">
+    <h2>Edited elsewhere</h2>
+    <p>This photo was changed in another tab or window since you opened it.</p>
+    <div class="dv-dialog-actions">
+        <button class="dv-btn" id="dv-conflict-load" type="button">Load latest</button>
+        <button class="dv-btn primary" id="dv-conflict-overwrite" type="button">Keep mine</button>
+    </div>
+</dialog>
+<dialog id="dv-modules-dialog" class="dv-dialog">
+    <h2 id="dv-md-title"></h2>
+    <label class="dv-field" id="dv-md-name-wrap"><span>Name</span><input id="dv-md-name" class="dv-input" maxlength="100"></label>
+    <div class="dv-md-grid" id="dv-md-list"></div>
+    <div class="dv-dialog-actions">
+        <button class="dv-btn" id="dv-md-all" type="button">All</button>
+        <button class="dv-btn" id="dv-md-none" type="button">None</button>
+        <span class="dv-spacer"></span>
+        <button class="dv-btn" id="dv-md-cancel" type="button">Cancel</button>
+        <button class="dv-btn primary" id="dv-md-ok" type="button">OK</button>
+    </div>
+</dialog>
+<dialog id="dv-export-dialog" class="dv-dialog">
+    <h2>Export</h2>
+    <div class="dv-form">
+        <label class="dv-field"><span>Format</span>
+            <select id="dv-ex-format" class="dv-select"><option value="jpeg">JPEG (8-bit)</option><option value="tiff16">TIFF (16-bit)</option></select></label>
+        <label class="dv-field"><span>Long side, px</span><input id="dv-ex-size" class="dv-input" type="number" min="64" max="20000" placeholder="Full size"></label>
+        <label class="dv-field" id="dv-ex-quality-wrap"><span>JPEG quality</span><input id="dv-ex-quality" class="dv-input" type="number" min="50" max="100" value="92"></label>
+        <label class="dv-field"><span>Color space</span>
+            <select id="dv-ex-space" class="dv-select"><option value="srgb">sRGB</option><option value="p3">Display P3</option></select></label>
+        <label class="dv-field"><span>Output sharpening</span>
+            <select id="dv-ex-sharpen" class="dv-select"><option value="none">None</option><option value="screen">Screen</option><option value="print">Print</option></select></label>
+        <label class="dv-check"><input id="dv-ex-meta" type="checkbox" checked> Copy EXIF / XMP metadata</label>
+    </div>
+    <p class="dv-hint" id="dv-ex-status"></p>
+    <div class="dv-dialog-actions">
+        <button class="dv-btn" id="dv-ex-cancel" type="button">Close</button>
+        <button class="dv-btn primary" id="dv-ex-go" type="button">Export</button>
+    </div>
+</dialog>
+<script type="module" src="{{asset "/static/js/develop/main.js"}}"></script>
+</body>
+</html>
+{{end}}

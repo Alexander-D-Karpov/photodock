@@ -11,7 +11,7 @@
     <meta property="og:type" content="article">
     <meta property="og:title" content="{{.Title}}">
     {{if .Photo.Description.Valid}}<meta property="og:description" content="{{.Photo.Description.String}}">{{end}}
-    <meta property="og:image" content="{{.BaseURL}}/thumb/medium/{{.Photo.ID}}">
+    <meta property="og:image" content="{{.BaseURL}}{{thumb "medium" .Photo.ID .Photo.EditHash}}">
     <meta property="og:image:width" content="{{.PreviewWidth}}">
     <meta property="og:image:height" content="{{.PreviewHeight}}">
     <meta property="og:image:type" content="image/jpeg">
@@ -20,11 +20,11 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{{.Title}}">
     {{if .Photo.Description.Valid}}<meta name="twitter:description" content="{{.Photo.Description.String}}">{{end}}
-    <meta name="twitter:image" content="{{.BaseURL}}/thumb/medium/{{.Photo.ID}}">
+    <meta name="twitter:image" content="{{.BaseURL}}{{thumb "medium" .Photo.ID .Photo.EditHash}}">
 
     {{if .NextURL}}<link rel="prefetch" href="{{.NextURL}}">{{end}}
     {{if .PrevURL}}<link rel="prefetch" href="{{.PrevURL}}">{{end}}
-    <link rel="preload" href="/thumb/large/{{.Photo.ID}}" as="image">
+    <link rel="preload" href="{{thumb "large" .Photo.ID .Photo.EditHash}}" as="image">
 </head>
 <body>
 <div class="viewer-container">
@@ -53,7 +53,7 @@
             {{if .PhotoPosition}}
             <span class="photo-counter">{{.PhotoPosition}} of {{.PhotoTotal}}</span>
             {{end}}
-            <a href="/original/{{.Photo.ID}}" target="_blank" class="btn-icon" title="View full resolution">
+            <a href="{{original .Photo.ID .Photo.EditHash}}" target="_blank" class="btn-icon" title="View full resolution">
                 {{template "icon-external"}}
             </a>
             <a href="/original/{{.Photo.ID}}?raw=1&download=1" download="{{.Photo.Filename}}" class="btn-icon" title="Download original ({{formatSize .Photo.SizeBytes}})">
@@ -73,7 +73,7 @@
             </div>
 
             <div class="viewer-image">
-                <img src="/thumb/large/{{.Photo.ID}}" alt="{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{else}}{{.Photo.Filename}}{{end}}" id="main-image" data-original="/original/{{.Photo.ID}}">
+                <img src="{{thumb "large" .Photo.ID .Photo.EditHash}}" alt="{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{else}}{{.Photo.Filename}}{{end}}" id="main-image" data-original="{{original .Photo.ID .Photo.EditHash}}">
             </div>
         </div>
 
@@ -267,8 +267,8 @@
     initViewer({
         prevUrl: {{if .PrevURL}}"{{.PrevURL}}"{{else}}null{{end}},
     nextUrl: {{if .NextURL}}"{{.NextURL}}"{{else}}null{{end}},
-    prevId: {{if .PrevID}}{{.PrevID}}{{else}}null{{end}},
-    nextId: {{if .NextID}}{{.NextID}}{{else}}null{{end}},
+    prevOriginal: {{if .PrevOriginal}}"{{.PrevOriginal}}"{{else}}null{{end}},
+    nextOriginal: {{if .NextOriginal}}"{{.NextOriginal}}"{{else}}null{{end}},
     folderUrl: {{if .FolderURL}}"{{.FolderURL}}"{{else}}null{{end}}
     });
 </script>
