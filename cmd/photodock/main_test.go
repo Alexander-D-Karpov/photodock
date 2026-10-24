@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Alexander-D-Karpov/photodock/internal/config"
+	"github.com/Alexander-D-Karpov/photodock/internal/develop"
 	"github.com/Alexander-D-Karpov/photodock/internal/handlers"
 	"github.com/Alexander-D-Karpov/photodock/internal/models"
 )
@@ -101,9 +102,10 @@ func TestTemplatesExecuteWithEditHash(t *testing.T) {
 	}
 	folder := models.Folder{ID: 7, Name: "f", Path: "f"}
 	pages := map[string]map[string]interface{}{
-		"public/index.html":      {"Photos": photos, "Folders": []models.Folder{folder}, "TotalSize": int64(0)},
-		"public/folder.html":     {"Photos": photos, "Folder": folder, "Subfolders": []models.Folder{folder}, "Breadcrumbs": []models.Folder{}, "TotalSize": int64(0)},
-		"public/photo.html":      {"Photo": &photos[0], "BaseURL": "https://example.test", "PrevOriginal": "/original/2?v=x"},
+		"public/index.html":  {"Photos": photos, "Folders": []models.Folder{folder}, "TotalSize": int64(0)},
+		"public/folder.html": {"Photos": photos, "Folder": folder, "Subfolders": []models.Folder{folder}, "Breadcrumbs": []models.Folder{}, "TotalSize": int64(0)},
+		"public/photo.html": {"Photo": &photos[0], "BaseURL": "https://example.test", "PrevOriginal": "/original/2?v=x",
+			"Develop": develop.Summarize(develop.Recipe{Tone: develop.Tone{Exposure: 0.5}, Lens: develop.Lens{Enabled: true}})},
 		"admin/photos.html":      {"Photos": photos, "Folders": []models.Folder{folder}, "TotalPages": 1, "CurrentPage": 1},
 		"admin/folder_edit.html": {"Photos": photos, "Folder": folder, "AllFolders": []models.Folder{folder}},
 		"admin/photo_edit.html":  {"Photo": photos[0], "Folders": []models.Folder{folder}},
@@ -115,6 +117,9 @@ func TestTemplatesExecuteWithEditHash(t *testing.T) {
 			continue
 		}
 		out := buf.String()
+		if name == "public/photo.html" && (!strings.Contains(out, "Lens corrected") || !strings.Contains(out, "unedited=1")) {
+			t.Errorf("photo page is missing the develop summary")
+		}
 		if name != "admin/photo_edit.html" && !strings.Contains(out, "?v="+hash) {
 			t.Errorf("%s: no versioned URL for the edited photo", name)
 		}
