@@ -43,34 +43,56 @@ type stagedItem struct {
 	Height     int    `json:"height"`
 	IsRaw      bool   `json:"is_raw"`
 	Rotation   int    `json:"rotation"`
+	EditRev    int64  `json:"edit_rev"`
+	Edited     bool   `json:"edited"`
 	PreviewURL string `json:"preview_url"`
 	ViewURL    string `json:"view_url"`
 }
 
 func (it *stagedItem) setURLs() {
-	v := "?r=" + strconv.Itoa(it.Rotation)
+	v := "?r=" + strconv.Itoa(it.Rotation) + "&e=" + strconv.FormatInt(it.EditRev, 10)
 	it.PreviewURL = "/admin/staging/" + it.ID + "/preview" + v
 	it.ViewURL = "/admin/staging/" + it.ID + "/view" + v
 }
 
-func (h *Handlers) stagingList(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Pool().Query(r.Context(),
-		`SELECT id, seq, filename, size_bytes, width, height, is_raw, COALESCE(rotation, 0)
-		 FROM staged_uploads ORDER BY seq, created_at, id`)
+const stagedItemSelect = `
+	SELECT su.id, su.seq, su.filename, su.size_bytes, su.width, su.height, su.is_raw,
+	       COALESCE(su.rotation, 0), su.edit_rev, (se.staged_id IS NOT NULL)
+	FROM staged_uploads su LEFT JOIN staged_edits se ON se.staged_id = su.id`
+
+func scanStagedItem(row interface{ Scan(...interface{}) error }) (*stagedItem, error) {
+	var it stagedItem
+	if err := row.Scan(&it.ID, &it.Seq, &it.Filename, &it.Size, &it.Width, &it.Height, &it.IsRaw,
+		&it.Rotation, &it.EditRev, &it.Edited); err != nil {
+		return nil, err
+	}
+	it.setURLs()
+	return &it, nil
+}
+
+func (h *Handlers) loadStagedItems(ctx context.Context) ([]stagedItem, error) {
+	rows, err := h.db.Pool().Query(ctx, stagedItemSelect+` ORDER BY su.seq, su.created_at, su.id`)
 	if err != nil {
-		h.jsonResponse(w, map[string]interface{}{"items": []stagedItem{}})
-		return
+		return nil, err
 	}
 	defer rows.Close()
-
 	items := []stagedItem{}
 	for rows.Next() {
-		var it stagedItem
-		if err := rows.Scan(&it.ID, &it.Seq, &it.Filename, &it.Size, &it.Width, &it.Height, &it.IsRaw, &it.Rotation); err != nil {
-			continue
+		if it, err := scanStagedItem(rows); err == nil {
+			items = append(items, *it)
 		}
-		it.setURLs()
-		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+func (h *Handlers) loadStagedItem(ctx context.Context, id string) (*stagedItem, error) {
+	return scanStagedItem(h.db.Pool().QueryRow(ctx, stagedItemSelect+` WHERE su.id = $1`, id))
+}
+
+func (h *Handlers) stagingList(w http.ResponseWriter, r *http.Request) {
+	items, err := h.loadStagedItems(r.Context())
+	if err != nil {
+		items = []stagedItem{}
 	}
 	h.jsonResponse(w, map[string]interface{}{"items": items})
 }
@@ -105,42 +127,53 @@ func (h *Handlers) stagingRotate(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-
-	var it stagedItem
-	err := h.db.Pool().QueryRow(r.Context(),
-		`SELECT id, seq, filename, size_bytes, width, height, is_raw, COALESCE(rotation, 0)
-		 FROM staged_uploads WHERE id = $1`, id).
-		Scan(&it.ID, &it.Seq, &it.Filename, &it.Size, &it.Width, &it.Height, &it.IsRaw, &it.Rotation)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
 	delta := 90
 	if r.FormValue("dir") == "ccw" {
 		delta = -90
 	}
-	rotation := services.NormalizeRotation(it.Rotation + delta)
 
+	// An edited file rotates its recipe (crop and masks follow) instead of
+	// the legacy staging rotation.
+	if h.develop != nil {
+		handled, err := h.develop.RotateStaged(r.Context(), id, delta)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if handled {
+			it, err := h.loadStagedItem(r.Context(), id)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			h.jsonResponse(w, it)
+			return
+		}
+	}
+
+	it, err := h.loadStagedItem(r.Context(), id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	rotation := services.NormalizeRotation(it.Rotation + delta)
 	dir := h.stagingDir(id)
-	srcPath := filepath.Join(dir, it.Filename)
-	pw, ph, err := h.thumbSvc.MakeStagingPreviews(srcPath, dir, rotation)
+	pw, ph, err := h.thumbSvc.MakeStagingPreviews(filepath.Join(dir, it.Filename), dir, rotation)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-
 	if _, err := h.db.Pool().Exec(r.Context(),
-		`UPDATE staged_uploads SET rotation = $1, width = $2, height = $3 WHERE id = $4`,
+		`UPDATE staged_uploads SET rotation = $1, width = $2, height = $3, edit_rev = edit_rev + 1 WHERE id = $4`,
 		rotation, pw, ph, id); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-
-	it.Rotation = rotation
-	it.Width = pw
-	it.Height = ph
-	it.setURLs()
+	it, err = h.loadStagedItem(r.Context(), id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
 	h.jsonResponse(w, it)
 }
 
@@ -380,6 +413,18 @@ func (h *Handlers) commitStaged(ctx context.Context, folderPath string) {
 			}
 			if err := h.scanSvc.ImportFile(ctx, rel, folderID, it.rotation); err != nil {
 				log.Printf("commit import %s: %v", rel, err)
+				return
+			}
+			if h.develop == nil {
+				return
+			}
+			var photoID int
+			if err := h.db.Pool().QueryRow(ctx, "SELECT id FROM photos WHERE path = $1", rel).Scan(&photoID); err != nil {
+				log.Printf("commit lookup %s: %v", rel, err)
+				return
+			}
+			if err := h.develop.AdoptStaged(ctx, it.id, photoID); err != nil {
+				log.Printf("commit develop %s: %v", rel, err)
 			}
 		}(it)
 	}
@@ -424,9 +469,13 @@ func (h *Handlers) stagingDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) CleanupStaging(ctx context.Context) {
-	rows, err := h.db.Pool().Query(ctx,
-		// browser sessions expire; API (importer) uploads wait until someone sorts them
-		"SELECT id FROM staged_uploads WHERE created_at < $1 AND source <> $2", time.Now().Add(-stagingMaxAge), stagingSourceAPI)
+	// Browser sessions expire; API (importer) uploads and files someone has
+	// already started developing wait until they are sorted.
+	rows, err := h.db.Pool().Query(ctx, `
+		SELECT su.id FROM staged_uploads su
+		WHERE su.created_at < $1 AND su.source <> $2
+		  AND NOT EXISTS (SELECT 1 FROM staged_edits se WHERE se.staged_id = su.id)`,
+		time.Now().Add(-stagingMaxAge), stagingSourceAPI)
 	if err == nil {
 		var ids []string
 		for rows.Next() {

@@ -27,10 +27,11 @@
 
         <div class="photo-edit-layout">
             <div class="photo-preview">
-                <img src="/thumb/medium/{{.Photo.ID}}" alt="{{.Photo.Filename}}">
+                <img src="{{thumb "medium" .Photo.ID .Photo.EditHash}}" alt="{{.Photo.Filename}}">
                 <div class="photo-preview-actions">
+                    <a href="/admin/develop/{{.Photo.ID}}" class="btn btn-primary">{{template "icon-develop"}} Develop</a>
                     <a href="/photo/{{.Photo.ID}}" target="_blank" class="btn btn-secondary">{{template "icon-external"}} View Full</a>
-                    <a href="/original/{{.Photo.ID}}" download="{{.Photo.Filename}}" class="btn btn-secondary">{{template "icon-upload"}} Download</a>
+                    <a href="/original/{{.Photo.ID}}?raw=1&download=1" download="{{.Photo.Filename}}" class="btn btn-secondary">{{template "icon-upload"}} Download</a>
                 </div>
             </div>
 

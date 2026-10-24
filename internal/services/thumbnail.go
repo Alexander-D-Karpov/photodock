@@ -384,3 +384,14 @@ func (s *ThumbnailService) AnalyzeColors(photoPath string) (*models.ColorInfo, e
 
 	return info, nil
 }
+
+// DevelopDir is where the develop engine publishes rendered derivatives for a
+// photo, one subdirectory per render hash.
+func (s *ThumbnailService) DevelopDir(photoID int) string {
+	return filepath.Join(s.cacheDir, "develop", fmt.Sprintf("%d", photoID))
+}
+
+// PlaceholderDims exposes placeholderDims to the develop engine.
+func PlaceholderDims(width, height int) (int, int) {
+	return placeholderDims(width, height)
+}

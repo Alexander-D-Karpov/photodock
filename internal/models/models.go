@@ -42,6 +42,7 @@ type Photo struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	TakenAt     sql.NullTime
+	EditHash    string
 }
 
 type ExifInfo struct {

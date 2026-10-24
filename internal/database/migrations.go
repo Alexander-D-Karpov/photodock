@@ -88,6 +88,64 @@ func (db *DB) Migrate() error {
 		last_used_at TIMESTAMPTZ,
 		revoked_at TIMESTAMPTZ
 	);
+
+	ALTER TABLE photos ADD COLUMN IF NOT EXISTS edit_hash TEXT;
+
+	CREATE TABLE IF NOT EXISTS photo_edits (
+		photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+		recipe JSONB NOT NULL,
+		defaults_version INTEGER NOT NULL,
+		recipe_revision BIGINT NOT NULL DEFAULT 1,
+		desired_hash TEXT NOT NULL,
+		published_hash TEXT,
+		source_width INTEGER NOT NULL DEFAULT 0,
+		source_height INTEGER NOT NULL DEFAULT 0,
+		source_blurhash TEXT NOT NULL DEFAULT '',
+		legacy_rotation INTEGER NOT NULL DEFAULT 0,
+		render_state TEXT NOT NULL DEFAULT 'queued',
+		render_error TEXT,
+		render_attempts INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		published_at TIMESTAMPTZ,
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_photo_edits_queue ON photo_edits(render_state, next_attempt_at)
+		WHERE published_hash IS DISTINCT FROM desired_hash;
+
+	CREATE TABLE IF NOT EXISTS photo_edit_history (
+		id BIGSERIAL PRIMARY KEY,
+		photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+		revision BIGINT NOT NULL,
+		recipe JSONB NOT NULL,
+		label TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_photo_edit_history_photo ON photo_edit_history(photo_id, id DESC);
+
+	CREATE TABLE IF NOT EXISTS lens_profile_map (
+		exif_lens TEXT PRIMARY KEY,
+		profile TEXT NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	CREATE TABLE IF NOT EXISTS develop_presets (
+		id SERIAL PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		recipe JSONB NOT NULL,
+		modules TEXT[] NOT NULL DEFAULT '{}',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	ALTER TABLE staged_uploads ADD COLUMN IF NOT EXISTS edit_rev BIGINT NOT NULL DEFAULT 0;
+
+	CREATE TABLE IF NOT EXISTS staged_edits (
+		staged_id TEXT PRIMARY KEY REFERENCES staged_uploads(id) ON DELETE CASCADE,
+		recipe JSONB NOT NULL,
+		revision BIGINT NOT NULL DEFAULT 1,
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
 	`
 	_, err := db.pool.Exec(context.Background(), schema)
 	return err

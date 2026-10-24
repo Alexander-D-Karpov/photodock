@@ -61,6 +61,14 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now photodock
 ```
 
+The develop editor decodes full-resolution RAW files (~1.5 GB peak per render),
+so install the memory limits too:
+```bash
+sudo mkdir -p /etc/systemd/system/photodock.service.d
+sudo cp deploy/photodock.service.d/memory.conf /etc/systemd/system/photodock.service.d/
+sudo systemctl daemon-reload && sudo systemctl restart photodock
+```
+
 ## Usage
 
 ### Web interface
