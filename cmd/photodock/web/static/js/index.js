@@ -80,9 +80,7 @@
             localStorage.setItem('photodock-sort', sortSelect.value);
         });
 
-        // Apply the current selection on load — even with no saved preference —
-        // so the rendered order always matches the dropdown (default: Newest first)
-        // instead of falling back to the server's name order.
+        // Always apply the selected sort on load so the order matches the dropdown (default: Newest).
         const savedSort = localStorage.getItem('photodock-sort');
         if (savedSort) {
             sortSelect.value = savedSort;

@@ -1,6 +1,4 @@
-// Batch develop actions on admin/photos: auto, apply preset, paste copied
-// settings and reset edits for the selected photos (selectedPhotos is the
-// global Set from admin.js).
+// Batch develop actions (auto, preset, paste, reset) for admin.js's global selectedPhotos.
 (function () {
     // Module ids must match internal/develop/modules.go.
     const MODULES = [

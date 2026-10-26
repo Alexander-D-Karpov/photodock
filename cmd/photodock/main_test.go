@@ -14,8 +14,7 @@ import (
 	"github.com/Alexander-D-Karpov/photodock/internal/models"
 )
 
-// newTestServer builds a route mux backed by the real embedded FS. db/thumb/scan
-// are nil, so only DB-free routes (favicon, static) may be exercised.
+// newTestServer builds a mux on the real embedded FS with nil db/thumb/scan, so only DB-free routes work.
 func newTestServer(t *testing.T) http.Handler {
 	t.Helper()
 	h := handlers.New(nil, &config.Config{}, nil, nil, nil, webFS)
@@ -51,8 +50,7 @@ func TestStaticServesEmbeddedAsset(t *testing.T) {
 	}
 }
 
-// TestEmbeddedTemplatesParse parses every embedded template with the real func
-// map, catching template syntax errors (which `go build` does not) at test time.
+// TestEmbeddedTemplatesParse parses all embedded templates with the real func map to catch syntax errors.
 func TestEmbeddedTemplatesParse(t *testing.T) {
 	tmpl, err := handlers.LoadTemplates(webFS)
 	if err != nil {
@@ -65,8 +63,7 @@ func TestEmbeddedTemplatesParse(t *testing.T) {
 	}
 }
 
-// TestEmbeddedStaticAssetsPresent guards the assets referenced by templates and
-// the favicon route, so a missing embed fails CI rather than at runtime.
+// TestEmbeddedStaticAssetsPresent ensures assets used by templates and favicon are embedded, failing CI if not.
 func TestEmbeddedStaticAssetsPresent(t *testing.T) {
 	staticFS, err := fs.Sub(webFS, "web/static")
 	if err != nil {
@@ -87,9 +84,7 @@ func TestEmbeddedStaticAssetsPresent(t *testing.T) {
 	}
 }
 
-// TestTemplatesExecuteWithEditHash executes the pages that build image URLs
-// from models.Photo. html/template resolves fields only at execution time, so
-// parsing alone would not catch a {{thumb ... .EditHash}} on the wrong type.
+// TestTemplatesExecuteWithEditHash executes image-URL pages, since fields like .EditHash resolve only at execution.
 func TestTemplatesExecuteWithEditHash(t *testing.T) {
 	tmpl, err := handlers.LoadTemplates(webFS)
 	if err != nil {
@@ -126,9 +121,7 @@ func TestTemplatesExecuteWithEditHash(t *testing.T) {
 	}
 }
 
-// TestDevelopPageImportMap renders the editor page and checks that every ES
-// module is mapped to its content-hashed URL, so nginx's long static cache
-// can never serve a stale module.
+// TestDevelopPageImportMap checks every editor ES module maps to its content-hashed URL, avoiding stale caches.
 func TestDevelopPageImportMap(t *testing.T) {
 	tmpl, err := handlers.LoadTemplates(webFS)
 	if err != nil {

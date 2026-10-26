@@ -2,8 +2,7 @@ import { api } from './api.js';
 
 const OPTS_KEY = 'photodock-develop-export';
 
-// setupExport wires the export dialog: it starts a server job for the current
-// (possibly unsaved) recipe, polls it and downloads the file when done.
+// setupExport runs a server export job for the current (maybe unsaved) recipe, polls it, downloads.
 export function setupExport(button, dialog, { id, getRecipe, toast, showError }) {
     const q = (s) => dialog.querySelector(s);
     const status = q('#dv-ex-status');

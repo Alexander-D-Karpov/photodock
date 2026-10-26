@@ -19,8 +19,7 @@ export const TABS = [
     { id: 'raw', label: 'RAW', rawOnly: true },
 ];
 
-// Ranges mirror develop.Recipe.Normalize; the server clamps every field
-// anyway, so a mismatch here cannot corrupt stored recipes.
+// Ranges mirror develop.Recipe.Normalize; the server clamps anyway, so a mismatch is harmless.
 export const MODULES = [
     { id: 'wb', tab: 'basic', title: 'White balance', kind: 'wb', paths: ['wb'] },
     {

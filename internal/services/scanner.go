@@ -30,10 +30,7 @@ func NewScannerService(db *database.DB, thumbSvc *ThumbnailService, exifSvc *Exi
 	return &ScannerService{db: db, thumbSvc: thumbSvc, exifSvc: exifSvc, mediaRoot: mediaRoot}
 }
 
-// orientedDimensions returns width/height swapped when the EXIF orientation
-// indicates a 90° rotation (values 5–8). Kept for callers that read raw header
-// dimensions; the thumbnail service auto-orients on decode, so its dimensions
-// are already post-rotation and must not be swapped again.
+// orientedDimensions swaps width/height for EXIF orientation 5–8; not for already auto-oriented dimensions.
 func orientedDimensions(width, height, orientation int) (int, int) {
 	if orientation >= 5 && orientation <= 8 {
 		return height, width
@@ -231,8 +228,7 @@ func (s *ScannerService) ReprocessAllMetadata(ctx context.Context) error {
 			takenAtPtr = &takenAt
 		}
 
-		// Edited photos take width/height/blurhash from the develop engine's
-		// published render; recomputing them from the source would revert it.
+		// Edited photos keep width/height/blurhash from the develop render; recomputing would revert it.
 		if p.edited {
 			if _, err := s.db.Pool().Exec(ctx,
 				`UPDATE photos SET exif_data = $1, taken_at = COALESCE($2, taken_at), updated_at = NOW() WHERE id = $3`,

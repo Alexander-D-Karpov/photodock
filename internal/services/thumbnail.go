@@ -104,11 +104,7 @@ func (s *ThumbnailService) GetThumbnailPathByID(photoID int, photoPath, size str
 	return thumbPath, nil
 }
 
-// RebuildDerivatives drops every cached rendering of a photo and regenerates it
-// from the current source and rotation. Thumbnails are keyed by photo ID alone,
-// so anything that changes how a photo renders (a rotation edit, a new RAW
-// decoder, a render-pipeline change) must go through here or the cached
-// thumbnails silently disagree with photos.width/height and with /original/.
+// RebuildDerivatives regenerates all cached renderings of a photo; any render-affecting change must call it.
 func (s *ThumbnailService) RebuildDerivatives(photoID int, photoPath, blurhash string, rotation, width, height int) {
 	_ = s.DeleteThumbnailsByID(photoID)
 	for _, size := range thumbSizes {
@@ -229,10 +225,7 @@ func (s *ThumbnailService) GeneratePlaceholder(blurhash string, width, height in
 	return imaging.Resize(tiny, width, height, imaging.Linear), nil
 }
 
-// placeholderDims scales a photo's dimensions down to a tiny box (longest side
-// ~64px) preserving aspect ratio, so the placeholder PNG matches the photo's
-// shape instead of being a square that gets stretched in the grid. Unknown
-// dims fall back to a square.
+// placeholderDims scales dims to a ~64px box keeping aspect ratio (unknown dims give a square).
 func placeholderDims(width, height int) (int, int) {
 	const maxSide = 64
 	if width <= 0 || height <= 0 {
@@ -385,8 +378,7 @@ func (s *ThumbnailService) AnalyzeColors(photoPath string) (*models.ColorInfo, e
 	return info, nil
 }
 
-// DevelopDir is where the develop engine publishes rendered derivatives for a
-// photo, one subdirectory per render hash.
+// DevelopDir is where the develop engine publishes a photo's rendered derivatives, one subdir per hash.
 func (s *ThumbnailService) DevelopDir(photoID int) string {
 	return filepath.Join(s.cacheDir, "develop", fmt.Sprintf("%d", photoID))
 }

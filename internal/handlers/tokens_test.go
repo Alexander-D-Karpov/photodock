@@ -40,8 +40,7 @@ func TestNewTokenSecret(t *testing.T) {
 	}
 }
 
-// Malformed or missing tokens are rejected before any database access
-// (h.db is nil here, so reaching the query would panic).
+// Malformed or missing tokens are rejected before any DB access (h.db is nil, so a query would panic).
 func TestTokenAuthRejectsWithoutDB(t *testing.T) {
 	h := &Handlers{}
 	called := false

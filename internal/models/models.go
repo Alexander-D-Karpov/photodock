@@ -22,6 +22,7 @@ type Folder struct {
 	HasChildren    bool
 	TotalSize      int64
 	LatestPhoto    sql.NullTime
+	Private        bool
 }
 
 type Photo struct {

@@ -15,9 +15,7 @@ import (
 	"time"
 )
 
-// API tokens let scripts (e.g. a camera importer) push photos into the unsorted
-// (staging) area without the admin password. Only the SHA-256 of a token is
-// stored; the plain token is shown once, right after it is created.
+// API tokens let scripts push photos into staging without the admin password; only their SHA-256 is stored.
 
 const (
 	tokenPrefix      = "pd_"
@@ -57,8 +55,7 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(auth[len(p):])
 }
 
-// tokenAuth accepts a valid, non-revoked API token. Requests without a
-// well-formed token are rejected before touching the database.
+// tokenAuth accepts a valid, non-revoked API token; malformed tokens are rejected before any DB access.
 func (h *Handlers) tokenAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok := bearerToken(r)
@@ -158,10 +155,7 @@ func (h *Handlers) apiTokenCheck(w http.ResponseWriter, r *http.Request) {
 	h.jsonResponse(w, map[string]interface{}{"ok": true})
 }
 
-// apiStagingUpload: POST /api/v1/staging, multipart field "file".
-// The file lands in the unsorted area exactly like a browser upload. A file whose
-// name and size already exist in staging or in the library is skipped
-// (200, "duplicate": true), so importers can safely retry.
+// apiStagingUpload: POST /api/v1/staging (field "file"); existing name+size is skipped as "duplicate" for safe retries.
 func (h *Handlers) apiStagingUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, apiUploadMax)
 	mr, err := r.MultipartReader()

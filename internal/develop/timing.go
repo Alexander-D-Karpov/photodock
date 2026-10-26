@@ -8,8 +8,7 @@ import (
 	"time"
 )
 
-// Timings collects per-stage durations of one preview request; handlers emit
-// them as a Server-Timing header. A nil *Timings is a no-op.
+// Timings collects per-stage durations of a preview request for the Server-Timing header; a nil *Timings is a no-op.
 
 const timingFloor = 50 * time.Microsecond
 

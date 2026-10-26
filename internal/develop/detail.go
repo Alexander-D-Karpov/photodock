@@ -9,10 +9,7 @@ const (
 	maxRegionSide       = 4096
 )
 
-// renderCtx carries what scale-dependent operations need to know about the
-// frame they run on, so a fit preview, a 1:1 tile and a full render produce
-// the same look: radii are relative to frameLong, detail ops to detailScale,
-// and masks map pixels back to the frame through space.
+// renderCtx describes the frame (frameLong, detailScale, mask space) so fit previews, 1:1 tiles and full renders look the same.
 type renderCtx struct {
 	detailScale float64
 	frameLong   float64
@@ -98,8 +95,7 @@ func lumPlane(img *Image) []float32 {
 	return s
 }
 
-// applyLumRatio scales every pixel by (after/before)² so a change computed on
-// the sqrt-luminance plane is applied without shifting hue.
+// applyLumRatio scales each pixel by (after/before)² so a sqrt-luminance plane change applies without shifting hue.
 func applyLumRatio(img *Image, before, after []float32) {
 	parallelPixels(img.W, img.H, func(i0, i1 int) {
 		for p := i0; p < i1; p++ {
@@ -331,8 +327,7 @@ func dehaze(img *Image, amount float64, ctx renderCtx) {
 	})
 }
 
-// regionMargin is how many extra pixels a 1:1 tile must render around itself
-// so neighbourhood filters see the same context as in a full render.
+// regionMargin is the extra pixels a 1:1 tile renders around itself so neighbourhood filters match a full render.
 func regionMargin(r Recipe, long int) int {
 	l := float64(long)
 	m := 8

@@ -138,9 +138,7 @@
         }
     }
 
-    // Thumbnails are generated auto-oriented, so a loaded thumbnail's natural
-    // dimensions are the true displayed aspect ratio. Trust them over the DB
-    // aspect (which is wrong for portraits stored as landscape) and relay out.
+    // Thumbnails are auto-oriented, so their natural size beats the DB aspect (wrong for portraits).
     function correctAspect(container, img) {
         if (!img.naturalWidth || !img.naturalHeight) return;
         const item = container.closest('.photo-item');
@@ -154,8 +152,7 @@
         }
     }
 
-    // Preload medium fully, then swap src; the browser paints the cached
-    // higher-res image over the small one with no flash.
+    // Preload medium fully, then swap src so the cached higher-res image paints with no flash.
     function upgradeToMedium(container) {
         if (container.dataset.upgraded) return;
         const img = container.querySelector('.full-image');
@@ -280,8 +277,7 @@
 
     function init() {
         layoutJustified();
-        // Reveal now that items are in their final (justified, or fallback on
-        // narrow viewports) positions — see the html.js #gallery rule in CSS.
+        // Reveal now that items are in their final positions (see the html.js #gallery CSS rule).
         revealGrid();
         observeGrid();
         initLazyLoading();

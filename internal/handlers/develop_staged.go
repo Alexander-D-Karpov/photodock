@@ -6,8 +6,7 @@ import (
 	"github.com/Alexander-D-Karpov/photodock/internal/develop"
 )
 
-// Editing files still in Unsorted. The API lives under its own prefix so the
-// Go 1.22 mux patterns never overlap /admin/api/develop/{id}.
+// Editing files still in Unsorted, under its own API prefix so mux patterns never overlap /admin/api/develop/{id}.
 func (h *Handlers) registerStagedDevelopRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/develop/staged/{sid}", h.adminAuth(h.adminDevelopStagedPage))
 	mux.HandleFunc("GET /admin/api/staged-develop/{sid}", h.adminAuth(h.stagedDevelopState))

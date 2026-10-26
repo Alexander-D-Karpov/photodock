@@ -24,8 +24,7 @@ func wbMatrix(illuminant, neutral [3]float64) Mat3 {
 	return rec2020FromXYZ.Mul(CAT(illuminant, neutral)).Mul(xyzFromRec2020)
 }
 
-// rasterWB is the white-balance matrix for non-RAW sources; RAW white balance
-// is applied by the decoder through the channel multipliers instead.
+// rasterWB is the white-balance matrix for non-RAW sources; RAW WB is applied by the decoder via channel multipliers.
 func rasterWB(r Recipe, raw bool) *Mat3 {
 	if raw || r.WB.Mode != WBCustom {
 		return nil

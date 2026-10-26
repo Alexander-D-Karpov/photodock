@@ -23,8 +23,7 @@ function jsonBody(method, body) {
     return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-// Per-photo endpoints are built from api.base so the same editor can drive
-// a file still in Unsorted (/admin/api/staged-develop).
+// Per-photo endpoints derive from api.base so the editor also drives Unsorted (staged-develop) files.
 export const api = {
     base: '/admin/api/develop',
     async state(id) {

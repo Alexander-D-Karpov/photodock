@@ -40,11 +40,7 @@ func applyGeometry(img *Image, orientation int, g Geometry) *Image {
 	return warp(img, plan, 1, 0, 0, w, h)
 }
 
-// applyTone runs everything after geometry, in scene-linear Rec.2020:
-// mixer/WB/exposure, denoise, dehaze, local and global tone, local contrast,
-// masks, presence and OKLab colour, then sharpening last. Masks come before
-// the global colour style so it lies over local edits. Each stage is timed
-// into ctx.timing for the Server-Timing header.
+// applyTone runs all post-geometry stages in linear Rec.2020 (masks before global colour, sharpening last), timed into ctx.timing.
 func applyTone(dst, src *Image, rc Recipe, pre *Mat3, ctx renderCtx) {
 	if dst != src {
 		copy(dst.Pix, src.Pix)
@@ -141,8 +137,7 @@ func encodeJPEG(img image.Image, quality int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// applyPre applies the channel mixer, the white-balance matrix (when not done
-// by the decoder) and exposure as one matrix-and-gain pass.
+// applyPre applies the channel mixer, WB matrix (unless done by the decoder) and exposure in one matrix-and-gain pass.
 func applyPre(img *Image, rc Recipe, pre *Mat3) {
 	gain := float32(math.Exp2(rc.Tone.Exposure))
 	mat := pre
@@ -168,8 +163,7 @@ func applyPre(img *Image, rc Recipe, pre *Mat3) {
 	})
 }
 
-// toEncoded8 converts linear Rec.2020 to an 8-bit image in the output space
-// selected by toOutput, with the sRGB transfer curve (also used by P3).
+// toEncoded8 converts linear Rec.2020 to 8-bit in the toOutput space with the sRGB transfer curve (also used by P3).
 func toEncoded8(img *Image, toOutput Mat3) *image.NRGBA {
 	out := image.NewNRGBA(image.Rect(0, 0, img.W, img.H))
 	m := toMat32(toOutput)

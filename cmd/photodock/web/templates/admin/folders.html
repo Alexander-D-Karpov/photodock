@@ -52,7 +52,7 @@
                             {{end}}
                         </div>
                         <div class="tree-content">
-                            <span class="tree-name">{{.Name}}</span>
+                            <span class="tree-name">{{.Name}}{{if .Private}} <span title="Private: admin only">🔒</span>{{end}}</span>
                             <span class="tree-meta">{{.PhotoCount}} photos{{if .SubfolderCount}}, {{.SubfolderCount}} subfolders{{end}}</span>
                         </div>
                         <div class="tree-path">{{.Path}}</div>

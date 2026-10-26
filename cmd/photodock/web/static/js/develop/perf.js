@@ -1,5 +1,4 @@
-// PerfHud (toggled with P) shows the last preview's round trip and server
-// stage breakdown plus rolling p50/p95 per kind of frame.
+// PerfHud (P key) shows the last preview's round trip, server stage breakdown and rolling p50/p95.
 const KEY = 'photodock-develop-perf';
 const WINDOW = 50;
 const SHOWN_PARTS = 5;

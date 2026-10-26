@@ -1,8 +1,6 @@
 import { clone } from './recipe.js';
 
-// Mask overlay: draws gradient/radial masks with draggable handles over the
-// fit preview. Mask coordinates are normalised to the straightened frame
-// before crop, mirroring internal/develop/masks.go.
+// Mask overlay with draggable handles; coords normalised to the straightened pre-crop frame (masks.go).
 
 const NS = 'http://www.w3.org/2000/svg';
 const LINE_EXT = 4000;

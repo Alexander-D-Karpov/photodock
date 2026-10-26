@@ -25,8 +25,7 @@ body.dv {
 
 button, select, input { font: inherit; color: inherit; }
 
-/* Pin each band to its row: the error bar is usually [hidden], and an
-   auto-placed grid would then shift the strip into the 1fr row. */
+/* Pin each band to its row so a [hidden] error bar can't shift the strip into the 1fr row. */
 body.dv > .dv-top { grid-row: 1; }
 body.dv > .dv-error { grid-row: 2; }
 body.dv > .dv-body { grid-row: 3; }

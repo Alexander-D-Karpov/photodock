@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// Auto analyses the frame (after crop and lens correction) and proposes
-// per-module settings. Tuning knobs are the constants below.
+// Auto analyses the frame (after crop and lens correction) and proposes per-module settings; tuning knobs are below.
 
 const (
 	autoSampleSide   = 768
@@ -30,8 +29,7 @@ const (
 	autoLensGap      = 0.3
 	autoBatchTimeout = 2 * time.Minute
 
-	// Low-key (dusk/night) scenes: cap the exposure lift and trust the
-	// camera white balance more as the scene darkens.
+	// Low-key (dusk/night) scenes: cap the exposure lift and trust camera WB more as the scene darkens.
 	autoLowKey      = 0.06
 	autoDarkKey     = 0.01
 	autoLowKeyBoost = 0.6
@@ -262,10 +260,7 @@ func logKey(sorted []float64) float64 {
 	return math.Exp(sum / float64(hi-lo))
 }
 
-// autoWhiteBalance is shades-of-gray over near-neutral mid-tones, blended
-// with the camera's value and kept as-shot when the two barely differ. The
-// shift is capped and trusted less in dark scenes, where twilight blue reads
-// as a cast.
+// autoWhiteBalance blends shades-of-gray over neutral mid-tones with camera WB; capped, less trusted in dark scenes, as-shot if close.
 func autoWhiteBalance(img *Image, from [3]float64, asT, asTint, sceneKey float64) (WBParams, string) {
 	keep := WBParams{Mode: WBAsShot}
 	var sum [3]float64
@@ -301,8 +296,7 @@ func autoWhiteBalance(img *Image, from [3]float64, asT, asTint, sceneKey float64
 	}
 	confidence := clamp((sceneKey-autoDarkKey)/(autoLowKey-autoDarkKey), autoWBMinConf, 1)
 	weight := autoWBBlend * confidence
-	// The cap scales with confidence too: ~30 mired (≈1600 K near 6500 K) for
-	// normal scenes, ~9 mired (≈400 K) for dusk and night.
+	// The cap scales with confidence: ~30 mired (≈1600 K near 6500 K) for normal scenes, ~9 mired (≈400 K) for dusk/night.
 	miredLimit := autoWBMaxMired * confidence
 	tintLimit := autoWBMaxTint * confidence
 	asMired := 1e6 / asT
@@ -353,8 +347,7 @@ func autoTone(lum []float64) (Tone, []string) {
 			shadows /= 2
 		}
 	}
-	// Night lights already give the top end; stretching whites in a low-key
-	// frame would only lift the background.
+	// Night lights already give the top end; stretching whites in a low-key frame would only lift the background.
 	whites := 0.0
 	if p998 < 0.95 && !lowKey {
 		whites = clamp((1-p998/0.97)/0.3*100, 0, 40)
@@ -456,8 +449,7 @@ func autoDetail(kind string, iso float64) (Detail, string) {
 	return d, fmt.Sprintf("Noise reduction %g / %g, sharpening %g (%s)", d.Noise.Luma, d.Noise.Chroma, d.Sharpen.Amount, isoText)
 }
 
-// autoLens enables lens correction when a profile is remembered for the lens
-// or the best Lensfun candidate is unambiguous.
+// autoLens enables lens correction when the lens has a remembered profile or an unambiguous best Lensfun candidate.
 func (e *Engine) autoLens(ctx context.Context, src *Source, resolved Recipe, info *ExifLens) (*Lens, string) {
 	if resolved.Lens.Enabled || src.Kind != "raw" || info.Lens == "" {
 		return nil, ""
@@ -480,8 +472,7 @@ func (e *Engine) autoLens(ctx context.Context, src *Source, resolved Recipe, inf
 	return &Lens{Enabled: true, Profile: c[0].ID}, fmt.Sprintf("Lens correction: %s %s", c[0].Maker, c[0].Model)
 }
 
-// lowKeyLimit is the most Auto may brighten a low-key scene: from
-// autoLowKeyBoost EV for very dark frames up to +autoLowKeyRange at autoLowKey.
+// lowKeyLimit is Auto's max brightening of a low-key scene: autoLowKeyBoost EV when very dark up to +autoLowKeyRange at autoLowKey.
 func lowKeyLimit(key float64) float64 {
 	t := clamp((key-autoDarkKey)/(autoLowKey-autoDarkKey), 0, 1)
 	return autoLowKeyBoost + autoLowKeyRange*t

@@ -82,9 +82,7 @@ func (d *Decoder) keyLock(key string) *sync.Mutex {
 	return v.(*sync.Mutex)
 }
 
-// LibRawVersion identifies the installed LibRaw build; it is part of every
-// render hash. dcraw_emu (LibRaw 0.22) prints no version string, so this falls
-// back to the binary's path, size and mtime, which change on a package upgrade.
+// LibRawVersion identifies the LibRaw build for render hashes; dcraw_emu 0.22 has no version, so it falls back to path/size/mtime.
 func (d *Decoder) LibRawVersion() string {
 	d.verOnce.Do(func() {
 		if d.dcraw == "" {
@@ -161,11 +159,7 @@ func (d *Decoder) RawInfo(ctx context.Context, path, fingerprint string) (*RawIn
 	return info, nil
 }
 
-// parseRawIdentify extracts white balance multipliers from `raw-identify -v`.
-// Older LibRaw prints "Camera multipliers:" / "Daylight multipliers:" lines;
-// 0.22 instead prints a "Makernotes WB data" table whose rows are
-// "<preset>  R G B G  <EVs>" plus a "Derived D65 multipliers:" line. The
-// returned as-shot value is zero when the output has none.
+// parseRawIdentify extracts WB multipliers from `raw-identify -v` (old multiplier lines or 0.22's Makernotes table); as-shot is zero if absent.
 func parseRawIdentify(out string) (asShot, daylight [3]float64) {
 	var tableShot, tableDay, camDay, derived [3]float64
 	for _, line := range strings.Split(out, "\n") {
@@ -215,8 +209,7 @@ func parseRawIdentify(out string) (asShot, daylight [3]float64) {
 	return asShot, daylight
 }
 
-// splitWBRow splits "  As shot   2720 1024 1824 1024   1.41 ..." into the
-// leading text label and the numbers that follow it.
+// splitWBRow splits "  As shot   2720 1024 1824 1024   1.41 ..." into the leading label and the numbers that follow.
 func splitWBRow(line string) (string, []float64) {
 	fields := strings.Fields(line)
 	i := 0

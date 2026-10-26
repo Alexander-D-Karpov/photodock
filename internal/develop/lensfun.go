@@ -14,11 +14,7 @@ import (
 	"strings"
 )
 
-// Lensfun XML database support. Coordinate systems follow lensfun's
-// modifier.cpp: for distortion and TCA r = 1 is half the short side; for
-// vignetting r = 1 is the frame corner. Coefficient interpolation is
-// simplified (linear for distortion/TCA, inverse-distance for vignetting)
-// where lensfun uses splines.
+// Lensfun XML support: r=1 is half the short side (distortion/TCA) or the corner (vignetting); no splines.
 
 type lfText struct {
 	Lang  string `xml:"lang,attr"`
@@ -709,8 +705,7 @@ func (m *lensModel) autoScale(w, h float64) {
 			for _, pt := range [4][2]float64{{t * w, 0}, {t * w, h}, {0, t * h}, {w, t * h}} {
 				xr, yr, xg, yg, xb, yb, _ := m.lookup(pt[0], pt[1])
 				for _, c := range [3][2]float64{{xr, yr}, {xg, yg}, {xb, yb}} {
-					// Strict bounds: any slack lets the search zoom out past 1
-					// and shift an undistorted frame.
+					// Strict bounds: any slack lets the search zoom out past 1 and shift an undistorted frame.
 					if c[0] < 0 || c[1] < 0 || c[0] > w || c[1] > h {
 						return false
 					}

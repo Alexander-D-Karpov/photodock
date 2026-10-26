@@ -162,8 +162,7 @@ a:hover { text-decoration: underline; }
     color: var(--text-secondary);
 }
 
-/* Justified rows: gallery.js wraps .photo-item anchors into .justified-row
-   flex rows; this flex-wrap container is the pre-JS fallback. */
+/* Justified rows are built by gallery.js; this flex-wrap container is the pre-JS fallback. */
 .masonry {
     display: flex;
     flex-wrap: wrap;
@@ -171,11 +170,7 @@ a:hover { text-decoration: underline; }
     align-items: flex-start;
 }
 
-/* Avoid the fallback->justified reflow flash on slow connections: when JS is
-   active (html.js, set by an inline head script), keep the grid invisible until
-   gallery.js applies the justified layout and marks it ready. No-JS users never
-   get html.js, so they still see the CSS masonry fallback. A head-script
-   timeout adds .jl-ready as a failsafe if gallery.js never loads. */
+/* With JS (html.js) hide the grid until gallery.js marks it .jl-ready, avoiding a reflow flash. */
 html.js #gallery:not(.jl-ready) { visibility: hidden; }
 
 .masonry > .photo-item {
@@ -414,12 +409,7 @@ html.js #gallery:not(.jl-ready) { visibility: hidden; }
     transform-origin: center center;
 }
 
-/* When zoomed, the JS transform:scale() does all the scaling. The image's
-   layout box MUST stay at its fit-to-screen size (max-width/max-height from
-   the base rule) — the pan/zoom math is computed against that box. Overriding
-   the box to natural size here jumps it mid-zoom and breaks the math (image
-   appears mis-sized/mispositioned the instant you zoom). Only the cursor
-   changes; the scaling is transform-only. */
+/* Zoom is transform-only: the box must keep its fit size since pan/zoom math depends on it. */
 .viewer-image img.zoomed {
     cursor: grab;
 }

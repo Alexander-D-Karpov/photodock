@@ -248,8 +248,7 @@ func Resolve(r Recipe, version int) (Recipe, error) {
 	return r, nil
 }
 
-// RenderHash identifies one rendering: engine version, source file, every
-// external dependency (LibRaw build, lens database) and the resolved recipe.
+// RenderHash identifies a rendering: engine version, source, external deps (LibRaw, lensdb) and recipe.
 func RenderHash(sourceFingerprint string, resolved Recipe, deps ...string) (string, error) {
 	c, err := canonicalJSON(resolved)
 	if err != nil {
@@ -430,8 +429,7 @@ type Wheel struct {
 	Lum float64 `json:"lum,omitempty"`
 }
 
-// Grading is split-toning by tonal range. Blending is stored as an offset
-// from 50 (range -50…50) so that zero stays neutral and out of the hash.
+// Grading is split-toning by tonal range; Blending is stored as an offset from 50 so zero stays neutral.
 type Grading struct {
 	Shadows    Wheel   `json:"shadows"`
 	Midtones   Wheel   `json:"midtones"`

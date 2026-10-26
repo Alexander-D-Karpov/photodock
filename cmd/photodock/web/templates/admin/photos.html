@@ -63,8 +63,8 @@
                     <input type="checkbox" class="photo-select" data-id="{{.ID}}" onchange="togglePhotoSelect({{.ID}}, this)">
                 </div>
                 {{if .EditHash}}<span class="edited-badge" title="Edited">✎</span>{{end}}
-                <a href="/admin/photos/{{.ID}}">
-                    <img src="{{thumb "small" .ID .EditHash}}" alt="{{.Filename}}" loading="lazy">
+                <a href="/admin/photos/{{.ID}}" class="photo-thumb-wrapper">
+                    <img src="{{thumb "small" .ID .EditHash}}" alt="{{.Filename}}" loading="lazy"{{if and .Width .Height}} width="{{.Width}}" height="{{.Height}}"{{end}}>
                 </a>
                 <div class="photo-admin-info">
                     <span class="filename">{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}</span>

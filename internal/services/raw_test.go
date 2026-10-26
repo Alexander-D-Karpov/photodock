@@ -40,8 +40,7 @@ func writeTestJPEG(t *testing.T, path string, w, h int) {
 	}
 }
 
-// openImage (non-RAW branch) + MakePreview. Needs the imaging dependency (always
-// present in-repo). No DB, no exiftool.
+// openImage (non-RAW branch) + MakePreview; needs only the in-repo imaging dependency, no DB or exiftool.
 func TestOpenImageAndMakePreviewJPEG(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.jpg")
@@ -88,8 +87,7 @@ func TestExtractRawPreviewErrorAndCleanup(t *testing.T) {
 	}
 }
 
-// Happy path. Skips unless exiftool is installed AND you drop a real Sony file
-// at internal/services/testdata/sample.arw.
+// Happy path; skips unless exiftool is installed and testdata/sample.arw (a real Sony file) exists.
 func TestExtractRawPreviewFromFixture(t *testing.T) {
 	if _, err := exec.LookPath("exiftool"); err != nil {
 		t.Skip("exiftool not installed")

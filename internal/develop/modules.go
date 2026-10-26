@@ -12,10 +12,7 @@ var moduleOrder = []string{
 	"sharpen", "noise", "lens", "raw", "crop", "masks",
 }
 
-// modulePaths maps a selectable module (presets, selective paste, batch
-// apply) to the recipe JSON paths it owns. The JS editor keeps the same list
-// in recipe.js MODULE_GROUPS; ids must match. Exposure is its own module so
-// style presets never reset it.
+// modulePaths maps each module to the recipe JSON paths it owns; must match recipe.js MODULE_GROUPS.
 var modulePaths = map[string][]string{
 	"wb":       {"wb"},
 	"exposure": {"tone.exposure"},
@@ -113,8 +110,7 @@ func parentOf(m map[string]any, path string, create bool) (map[string]any, strin
 	return cur, parts[len(parts)-1]
 }
 
-// MergeModules returns dst with every path owned by the given modules
-// replaced by src's value (or removed when src has none).
+// MergeModules returns dst with the given modules' paths replaced by src's values (removed if absent).
 func MergeModules(dst, src Recipe, modules []string) (Recipe, error) {
 	if err := ValidModules(modules); err != nil {
 		return Recipe{}, err

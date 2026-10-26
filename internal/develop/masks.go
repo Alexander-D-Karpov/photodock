@@ -7,9 +7,7 @@ import (
 	"strings"
 )
 
-// Local masks: linear gradients and radial ellipses, each with its own small
-// set of adjustments. Coordinates are normalised to the straightened frame
-// before crop, so changing the crop never moves a mask relative to the scene.
+// Local masks (linear/radial) in straightened pre-crop coordinates, so cropping never moves a mask.
 
 const (
 	maxMasks       = 16
@@ -102,8 +100,7 @@ func normalizeMasks(ms []Mask) ([]Mask, error) {
 	return out, nil
 }
 
-// maskSpace maps a pixel of the image being processed back to straightened,
-// uncropped frame pixels: frame = off + (pixel + 0.5) / scale.
+// maskSpace maps a processed pixel to straightened, uncropped frame pixels: off + (pixel+0.5)/scale.
 type maskSpace struct {
 	offX, offY     float64
 	sx, sy         float64

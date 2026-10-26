@@ -2,9 +2,7 @@ package develop
 
 import "math"
 
-// Colour operations (HSL, B&W mix, grading) work in OKLab/OKLCh: hues are
-// separated perceptually and every effect is weighted by chroma, so neutral
-// greys are never tinted.
+// Colour ops (HSL, B&W mix, grading) work in OKLab/OKLCh, weighted by chroma so neutral greys are never tinted.
 
 var (
 	oklabM1 = Mat3{
@@ -64,8 +62,7 @@ func smooth64(a, b, x float64) float64 {
 	return t * t * (3 - 2*t)
 }
 
-// bandWeights returns the two neighbouring hue bands of an OKLCh hue (degrees)
-// and the raised-cosine weight of the first.
+// bandWeights returns the two neighbouring hue bands of an OKLCh hue (degrees) and the raised-cosine weight of the first.
 func bandWeights(deg float64) (int, int, float64) {
 	for i := 0; i < 8; i++ {
 		c0 := hueCenters[i]
@@ -85,8 +82,7 @@ func bandWeights(deg float64) (int, int, float64) {
 	return 7, 0, 1
 }
 
-// oklabHueOf converts an HSV-style hue (degrees, as on the grading wheels) to
-// the OKLab hue angle of that sRGB primary mix.
+// oklabHueOf converts an HSV-style hue (degrees, as on the grading wheels) to the OKLab hue angle of that sRGB mix.
 func oklabHueOf(deg float64) float64 {
 	h := math.Mod(math.Mod(deg, 360)+360, 360) / 60
 	i := int(h)

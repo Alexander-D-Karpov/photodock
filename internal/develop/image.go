@@ -260,8 +260,7 @@ func (img *Image) sampleBilinear(x, y float64, dst []float32) {
 	}
 }
 
-// Straighten rotates by angle degrees and crops to the largest centred
-// rectangle of the original aspect ratio that has no empty corners.
+// Straighten rotates by angle degrees and crops to the largest centred same-aspect rectangle with no empty corners.
 func (img *Image) Straighten(angle float64) *Image {
 	if angle == 0 {
 		return img

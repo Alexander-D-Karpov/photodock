@@ -21,8 +21,7 @@ func TestPlaceholderDims(t *testing.T) {
 		if gotW != c.wantW || gotH != c.wantH {
 			t.Errorf("placeholderDims(%d,%d) = %dx%d; want %dx%d", c.w, c.h, gotW, gotH, c.wantW, c.wantH)
 		}
-		// Placeholder must preserve the photo's orientation (never square-ify a
-		// non-square photo), which is the whole point of the fix.
+		// Placeholder must preserve the photo's orientation: never square-ify a non-square photo.
 		if c.w > 0 && c.h > 0 && c.w != c.h {
 			photoLandscape := c.w > c.h
 			phLandscape := gotW > gotH

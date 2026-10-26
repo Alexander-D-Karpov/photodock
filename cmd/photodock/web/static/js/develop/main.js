@@ -514,8 +514,7 @@ async function resetAll() {
     }
 }
 
-// runAuto asks the server to analyse the frame and merges the proposed
-// modules as one undo step.
+// runAuto asks the server to analyse the frame and merges its proposed modules as one undo step.
 async function runAuto(options = { wb: true }, label = 'Auto') {
     if (!sourceAvailable() || els.autoButton.disabled) return;
     if (app.mode === 'crop') applyCrop();
@@ -787,9 +786,7 @@ function imageBox() {
     return { left: i.left - s.left, top: i.top - s.top, width: i.width, height: i.height };
 }
 
-// fitImage sizes the fit preview explicitly to "contain" the stage, so a
-// reduced-resolution drag frame occupies the same box as a final frame
-// instead of shrinking to its natural size.
+// fitImage sizes the preview to "contain" the stage so low-res drag frames fill the same box.
 function fitImage() {
     const img = els.image;
     if (!img.naturalWidth || !img.naturalHeight) return;

@@ -168,8 +168,7 @@ func TestLensCandidates(t *testing.T) {
 	}
 }
 
-// TestSystemLensfunLoads checks the installed Lensfun database parses when
-// present (Arch ships it under version_1).
+// TestSystemLensfunLoads checks the installed Lensfun database (Arch: version_1) parses when present.
 func TestSystemLensfunLoads(t *testing.T) {
 	dir := detectLensfunDir()
 	if dir == "" {

@@ -2,10 +2,7 @@ import { api } from './api.js';
 
 const DRAG_SCALE = 0.6;
 
-// Previewer keeps at most one request in flight and always renders the most
-// recent recipe; intermediate drag states are dropped, a final one aborts.
-// Sizing and the optional 1:1 region come from callbacks so the same class
-// drives both the fit view and the zoom view.
+// Previewer keeps one request in flight, renders the latest recipe; serves both fit and zoom views.
 export class Previewer {
     constructor(id, img, callbacks) {
         this.id = id;

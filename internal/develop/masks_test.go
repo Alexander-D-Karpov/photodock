@@ -110,8 +110,7 @@ func TestEmptyMasksKeepHash(t *testing.T) {
 	}
 }
 
-// TestMaskTileMatchesFull checks that a 1:1 tile places a mask exactly where
-// the full render does.
+// TestMaskTileMatchesFull checks that a 1:1 tile places a mask exactly where the full render does.
 func TestMaskTileMatchesFull(t *testing.T) {
 	src := NewImage(60, 40)
 	for i := range src.Pix {

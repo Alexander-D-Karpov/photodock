@@ -115,8 +115,7 @@ func TestTemplateFuncMapAsset(t *testing.T) {
 	}
 }
 
-// TestTemplateFuncMapRenders exercises the func map through an actual template
-// render, matching how templates invoke asset in an attribute context.
+// TestTemplateFuncMapRenders exercises the func map via a real render, using asset in an attribute context.
 func TestTemplateFuncMapRenders(t *testing.T) {
 	fm := templateFuncMap(map[string]string{"/static/css/public.css": "deadbeef"})
 	tmpl := template.Must(template.New("t").Funcs(fm).Parse(

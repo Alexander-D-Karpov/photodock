@@ -132,8 +132,7 @@ func (h *Handlers) stagingRotate(w http.ResponseWriter, r *http.Request) {
 		delta = -90
 	}
 
-	// An edited file rotates its recipe (crop and masks follow) instead of
-	// the legacy staging rotation.
+	// An edited file rotates its recipe (crop and masks follow) instead of the legacy staging rotation.
 	if h.develop != nil {
 		handled, err := h.develop.RotateStaged(r.Context(), id, delta)
 		if err != nil {
@@ -469,8 +468,7 @@ func (h *Handlers) stagingDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) CleanupStaging(ctx context.Context) {
-	// Browser sessions expire; API (importer) uploads and files someone has
-	// already started developing wait until they are sorted.
+	// Browser sessions expire; API uploads and files already being developed wait until they are sorted.
 	rows, err := h.db.Pool().Query(ctx, `
 		SELECT su.id FROM staged_uploads su
 		WHERE su.created_at < $1 AND su.source <> $2

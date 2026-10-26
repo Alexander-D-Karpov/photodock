@@ -532,14 +532,16 @@ a:hover { text-decoration: underline; }
 
 .photo-admin-card .photo-thumb-wrapper {
     position: relative;
+    display: block;
     width: 100%;
+    aspect-ratio: 1;
     background: var(--border);
 }
 
 .photo-admin-card .photo-thumb-wrapper img {
     width: 100%;
-    aspect-ratio: 1;
-    object-fit: cover;
+    height: 100%;
+    object-fit: contain;
     display: block;
 }
 

@@ -1,7 +1,4 @@
-// ZoomView shows a full-resolution region at one image pixel per device pixel
-// and pans it by dragging; a release asks for the newly exposed region.
-// The fit preview (backdrop) stays visible, scaled to the same position, so
-// the photo never disappears while a region decodes or after a pan.
+// ZoomView pans a 1:1 full-res region over the scaled fit preview so the photo never disappears.
 export class ZoomView {
     constructor(stage, img, backdrop) {
         this.stage = stage;
@@ -79,8 +76,7 @@ export class ZoomView {
         this.layout();
     }
 
-    // layoutBackdrop scales the fit preview so the point (cx, cy) sits at the
-    // stage centre at 1:1 scale, matching where the sharp region will land.
+    // layoutBackdrop scales the fit preview so (cx, cy) sits at stage centre at 1:1, like the region.
     layoutBackdrop(r) {
         const b = this.backdrop;
         if (!b || !b.offsetWidth || !this.fullW) return;

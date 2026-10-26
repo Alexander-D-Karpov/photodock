@@ -36,8 +36,7 @@ func (h *Handlers) registerDevelopRoutes(mux *http.ServeMux) {
 	h.registerDevelopAutoRoutes(mux)
 }
 
-// versionedURL appends ?v=<edit hash> so a re-render gets a fresh URL that can
-// be cached immutably; unedited photos keep their bare legacy URL.
+// versionedURL appends ?v=<edit hash> so re-renders get immutable URLs; unedited photos keep the bare URL.
 func versionedURL(base, hash string) string {
 	if hash == "" {
 		return base
@@ -52,8 +51,7 @@ func (h *Handlers) publishedFile(id int, hash, name string) (string, bool) {
 	return h.develop.PublishedFile(id, hash, name)
 }
 
-// setDerivedCache caches a published render immutably only when the request
-// names that exact render; an unversioned URL may change on the next edit.
+// setDerivedCache caches a render immutably only when the request names that exact render version.
 func setDerivedCache(w http.ResponseWriter, r *http.Request, hash string) {
 	if r.URL.Query().Get("v") == hash {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
@@ -62,8 +60,7 @@ func setDerivedCache(w http.ResponseWriter, r *http.Request, hash string) {
 	w.Header().Set("Cache-Control", "public, max-age=60")
 }
 
-// setLegacyCache is for the pre-develop derivatives. An edited photo whose
-// render is not on disk yet falls back to them, and that must not be cached.
+// setLegacyCache caches pre-develop derivatives, except as a fallback for an edited photo's pending render.
 func setLegacyCache(w http.ResponseWriter, editHash string) {
 	if editHash != "" {
 		w.Header().Set("Cache-Control", "no-store")
@@ -197,8 +194,7 @@ func (h *Handlers) readSave(w http.ResponseWriter, r *http.Request) (develop.Rec
 	return rec, req.Revision, req.Label, true
 }
 
-// writeSaveResult answers a conflict with 409 and the current state so the
-// editor can offer "load latest" or "keep mine".
+// writeSaveResult answers a conflict with 409 plus current state so the editor can offer "load latest"/"keep mine".
 func (h *Handlers) writeSaveResult(w http.ResponseWriter, st *develop.State, err error, current func() (*develop.State, error)) {
 	if errors.Is(err, develop.ErrConflict) {
 		if cur, cerr := current(); cerr == nil {

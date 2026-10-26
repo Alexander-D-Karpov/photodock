@@ -128,9 +128,7 @@ func developRawtherapee(bin, src, dst, work string) (string, error) {
 	return dst, nil
 }
 
-// dcraw_emu names its output after the input, so the source is symlinked into a
-// scratch dir: writing next to the original would drop a .tiff into MEDIA_ROOT
-// and the scanner would pick it up as a photo.
+// dcraw_emu writes next to its input, so symlink the source into a scratch dir to keep .tiffs out of MEDIA_ROOT.
 func developDcrawEmu(bin, src, dst, work string) (string, error) {
 	link := filepath.Join(work, "in"+filepath.Ext(src))
 	if err := os.Symlink(src, link); err != nil {
@@ -179,8 +177,7 @@ func rawCacheKey(absPath string, rotation int) (string, error) {
 	return hex.EncodeToString(h[:])[:20], nil
 }
 
-// exifOrientation reads the camera's orientation flag numerically. Returns 0
-// when exiftool is unavailable or the tag is absent.
+// exifOrientation reads the numeric orientation flag; 0 when exiftool is unavailable or the tag is absent.
 func exifOrientation(path string) int {
 	out, err := exec.Command("exiftool", "-s3", "-n", "-Orientation", path).Output()
 	if err != nil {
@@ -217,10 +214,7 @@ func orientImage(img image.Image, orientation int) image.Image {
 	return img
 }
 
-// fixRawOrientation compensates for decoders that ignore the camera's
-// orientation flag. Sensors are landscape, so an orientation of 5-8 means the
-// displayed frame must be portrait; a still-landscape render means the turn was
-// not applied (or was applied twice) and has to be redone here.
+// fixRawOrientation re-rotates renders whose decoder ignored orientation 5-8 (frame should be portrait).
 func fixRawOrientation(img image.Image, orientation int) image.Image {
 	if orientation < 5 || orientation > 8 {
 		return img
@@ -232,10 +226,7 @@ func fixRawOrientation(img image.Image, orientation int) image.Image {
 	return orientImage(img, orientation)
 }
 
-// normalizeRawRender re-encodes a decoder's output into a plain JPEG with the
-// orientation baked into the pixels and no EXIF left behind, so thumbnails
-// (which read it through imaging) and browsers (which get the file verbatim
-// from /original/) can never disagree about which way is up.
+// normalizeRawRender re-encodes decoder output as EXIF-free JPEG with orientation baked in, so all viewers agree.
 func normalizeRawRender(src, dst string, orientation int) error {
 	img, err := imaging.Open(src, imaging.AutoOrientation(true))
 	if err != nil {
@@ -277,9 +268,7 @@ func extractRawPreview(srcPath, cacheDir string) (string, func(), error) {
 	return "", func() {}, os.ErrNotExist
 }
 
-// rawBase returns a cached, full-resolution, correctly oriented JPEG rendering
-// of a RAW file, developing it on first use. Falls back to the embedded preview
-// when no decoder is installed.
+// rawBase returns a cached, full-res, oriented JPEG of a RAW file, falling back to the embedded preview.
 func (s *ThumbnailService) rawBase(absPath string) (string, error) {
 	key, err := rawCacheKey(absPath, 0)
 	if err != nil {
@@ -343,8 +332,7 @@ func (s *ThumbnailService) rawBase(absPath string) (string, error) {
 	return dst, os.Rename(normalized, dst)
 }
 
-// RawWebPath returns a browser-viewable full-resolution JPEG for a RAW file,
-// with the stored rotation applied on top of the normalized base.
+// RawWebPath returns a browser-viewable full-res JPEG for a RAW file with the stored rotation applied.
 func (s *ThumbnailService) RawWebPath(absPath string, rotation int) (string, error) {
 	base, err := s.rawBase(absPath)
 	if err != nil {

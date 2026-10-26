@@ -2,8 +2,7 @@ package develop
 
 import "sync"
 
-// Built-in presets: listed with negative IDs, cannot be deleted. Their module
-// list is derived from what each recipe actually sets.
+// Built-in presets: negative IDs, undeletable; modules derived from what each recipe sets.
 
 var (
 	builtinOnce  sync.Once

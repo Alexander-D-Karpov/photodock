@@ -19,8 +19,7 @@ func (t affine2) then(u affine2) affine2 {
 	}
 }
 
-// dihedralOp returns, for an input of size w×h, the inverse mapping from
-// output to input coordinates and the output size.
+// dihedralOp returns, for a w×h input, the output-to-input inverse mapping and the output size.
 type dihedralOp func(w, h float64) (affine2, float64, float64)
 
 func opRotate(quarter int) dihedralOp {
@@ -69,10 +68,7 @@ func orientationOps(o int) []dihedralOp {
 	return nil
 }
 
-// geomPlan is the whole geometry stage as one inverse mapping from an output
-// pixel to a sensor pixel: orientation, rotation, flips, straighten, crop and
-// (optionally) the lens model. Fit previews, 1:1 regions and full renders all
-// sample through it, so they agree pixel for pixel.
+// geomPlan is the whole geometry stage as one output-to-sensor inverse mapping, shared by every render path.
 type geomPlan struct {
 	toSensor     affine2
 	dispW, dispH float64

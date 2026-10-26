@@ -1,7 +1,6 @@
 import { MODULE_GROUPS } from './recipe.js';
 
-// chooseModules asks which recipe modules to paste or save; it resolves to
-// { name, modules } or null when cancelled.
+// chooseModules asks which recipe modules to paste or save; resolves { name, modules } or null.
 export function chooseModules({ title, okLabel = 'OK', withName = false, selected = [] }) {
     const dialog = document.getElementById('dv-modules-dialog');
     const q = (id) => dialog.querySelector(id);

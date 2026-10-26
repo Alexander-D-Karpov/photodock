@@ -51,8 +51,7 @@ type ExportJob struct {
 	path     string
 }
 
-// exportRegistry tracks export jobs in memory; finished files live in
-// CACHE_DIR/exports for exportTTL and do not survive a restart's registry.
+// exportRegistry tracks export jobs in memory; files live in CACHE_DIR/exports for exportTTL and the registry doesn't survive restarts.
 type exportRegistry struct {
 	mu   sync.Mutex
 	jobs map[string]*ExportJob
@@ -202,8 +201,7 @@ func (e *Engine) ExportFile(id string) (string, string, bool) {
 func (e *Engine) runExport(jid, path string, src *Source, r Recipe, opts ExportOptions) {
 	ctx, cancel := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel()
-	// Exports share the render lock with publishing so two full-resolution
-	// renders never hold memory at once.
+	// Exports share the render lock with publishing so two full-resolution renders never hold memory at once.
 	e.renderMu.Lock()
 	defer e.renderMu.Unlock()
 	e.exports.update(jid, func(j *ExportJob) { j.State = "running" })
@@ -271,9 +269,7 @@ func (e *Engine) export(ctx context.Context, path string, src *Source, r Recipe,
 	return os.Rename(tmp, path)
 }
 
-// copyMetadata copies EXIF/XMP/IPTC from the source, minus GPS (the gallery
-// strips location on import), embedded previews and the orientation, which
-// the render has already applied.
+// copyMetadata copies EXIF/XMP/IPTC from the source, minus GPS, embedded previews and orientation (already applied by the render).
 func (e *Engine) copyMetadata(ctx context.Context, src, dst string) error {
 	if e.dec.exiftool == "" {
 		return nil
@@ -329,8 +325,7 @@ func encode16(v float32) uint16 {
 	return enc16LUT[int(v*(1<<enc16Bits)+0.5)]
 }
 
-// writeTIFF16 writes an uncompressed little-endian 16-bit RGB TIFF with an
-// embedded ICC profile.
+// writeTIFF16 writes an uncompressed little-endian 16-bit RGB TIFF with an embedded ICC profile.
 func writeTIFF16(w io.Writer, img *Image, toOutput Mat3, icc []byte) error {
 	const (
 		nTags      = 15

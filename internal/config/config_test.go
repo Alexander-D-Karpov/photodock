@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// setEnv clears the PhotoDock env vars, then applies overrides, restoring the
-// originals on cleanup. t.Setenv gives us isolation per subtest.
+// setEnv clears PhotoDock env vars, applies overrides, and restores originals via t.Setenv.
 func setEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
 	keys := []string{"MEDIA_ROOT", "DATABASE_URL", "CACHE_DIR", "LISTEN_ADDR", "ADMIN_USER", "ADMIN_PASS"}

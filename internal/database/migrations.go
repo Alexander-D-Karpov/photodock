@@ -1,6 +1,9 @@
 package database
 
-import "context"
+import (
+	"context"
+	"log"
+)
 
 func (db *DB) Migrate() error {
 	schema := `
@@ -148,7 +151,30 @@ func (db *DB) Migrate() error {
 		revision BIGINT NOT NULL DEFAULT 1,
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
+
+	DO $$ BEGIN
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'folders' AND column_name = 'private') THEN
+			ALTER TABLE folders ADD COLUMN private BOOLEAN NOT NULL DEFAULT FALSE;
+			UPDATE folders SET private = TRUE WHERE lower(name) = 'stash' AND parent_id IS NULL;
+		END IF;
+	END $$;
 	`
-	_, err := db.pool.Exec(context.Background(), schema)
-	return err
+	if _, err := db.pool.Exec(context.Background(), schema); err != nil {
+		return err
+	}
+	var private []string
+	rows, err := db.pool.Query(context.Background(), "SELECT path FROM folders WHERE private ORDER BY path")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) == nil {
+			private = append(private, p)
+		}
+	}
+	log.Printf("private folders: %v", private)
+	return rows.Err()
 }

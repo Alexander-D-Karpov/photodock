@@ -69,8 +69,7 @@ function initViewer(opts) {
     // Mobile: stop browser’s native pan/zoom from stealing gestures
     container.style.touchAction = 'none';
 
-    // Preserve any CSS transform the image already has (common cause of “zoom doesn’t work”)
-    // We re-sample it on resize because computed matrix can change with layout.
+    // Preserve any existing CSS transform (re-sampled on resize since the computed matrix can change).
     let cssTransform = '';
     function refreshCssTransform() {
         const prev = img.style.transform;
@@ -175,8 +174,7 @@ function initViewer(opts) {
         const hi = new Image();
         hi.src = orig;
 
-        // Decode off-screen before swapping so the visible <img> paints from
-        // cache instead of re-decoding the multi-MB file and blanking.
+        // Decode off-screen before swapping so the visible <img> paints from cache without blanking.
         const swap = () => {
             img.src = orig;
             img.dataset.upgraded = 'true';
@@ -361,8 +359,7 @@ function initViewer(opts) {
     apply();
 }
 
-// initCompare shows the unedited photo while a compare button (top bar or
-// sidebar) or the B key is held, then restores whatever was displayed.
+// initCompare shows the unedited photo while a compare button or B is held, then restores the view.
 function initCompare(img) {
     const btns = Array.from(document.querySelectorAll('.develop-compare-btn'));
     if (!btns.length || !img) return;

@@ -7,8 +7,7 @@ import (
 	"strings"
 )
 
-// Summary describes a recipe for the public photo page: one row per module
-// that changes the image.
+// Summary describes a recipe for the public photo page: one row per module that changes the image.
 type Summary struct {
 	Rows []SummaryRow
 }

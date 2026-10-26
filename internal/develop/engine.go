@@ -383,9 +383,7 @@ func (e *Engine) PublishedFile(id int, hash, name string) (string, bool) {
 
 func (e *Engine) Start(ctx context.Context) {
 	go func() {
-		// A job still marked 'rendering' was interrupted by a restart, possibly
-		// an OOM kill caused by that very render. Count it as an attempt so a
-		// render that kills the process cannot crash-loop the service forever.
+		// A 'rendering' job was cut off by a restart (maybe its own OOM); count it so a crashing render can't crash-loop the service.
 		if _, err := e.db.Pool().Exec(ctx, `
 			UPDATE photo_edits SET render_attempts = render_attempts + 1,
 				render_state = CASE WHEN render_attempts + 1 >= $1 THEN 'failed' ELSE 'queued' END,
@@ -770,8 +768,7 @@ func (c *proxyCache) put(key string, v *loaded) {
 	}
 }
 
-// fullCache keeps the single most recent full-resolution decode for 1:1
-// previews; it is dropped before a full render and after gcGrace idle.
+// fullCache keeps the latest full-resolution decode for 1:1 previews; dropped before a full render and after gcGrace idle.
 type fullCache struct {
 	mu   sync.Mutex
 	key  string
@@ -960,9 +957,7 @@ func (e *Engine) prepare(ctx context.Context, id int, rec Recipe) (Recipe, *Sour
 	return resolved, src, nil
 }
 
-// wbPlan decides how white balance is applied. quality "fast" lets a RAW
-// custom white balance skip the re-decode: the as-shot proxy is corrected
-// with a CAT matrix, approximate but instant while dragging.
+// wbPlan decides how WB is applied; quality "fast" corrects a RAW custom WB on the as-shot proxy via CAT instead of re-decoding.
 func (e *Engine) wbPlan(ctx context.Context, src *Source, resolved Recipe, quality string) (Recipe, *Mat3, string, error) {
 	decodeRecipe := resolved
 	pre := rasterWB(resolved, src.Kind == "raw")
@@ -995,8 +990,7 @@ func (e *Engine) acquire(ctx context.Context) (func(), error) {
 	}
 }
 
-// Preview renders the recipe either fitted to MaxW×MaxH from the cached proxy,
-// or, with Region set, as a 1:1 tile from the full-resolution decode.
+// Preview renders the recipe fitted to MaxW×MaxH from the cached proxy, or with Region set as a 1:1 tile from the full decode.
 func (e *Engine) Preview(ctx context.Context, id int, rec Recipe, req PreviewRequest) (*PreviewResult, error) {
 	resolved, src, err := e.prepare(ctx, id, rec)
 	if err != nil {
@@ -1067,9 +1061,7 @@ func (e *Engine) previewRegion(ctx context.Context, src *Source, resolved, decod
 	}, nil
 }
 
-// SampleWB finds the white balance that neutralises the average colour of
-// area (normalised to the geometry-applied frame), or of the whole frame when
-// area is nil (auto).
+// SampleWB finds the white balance that neutralises the average colour of area (geometry-applied frame), or the whole frame if nil.
 func (e *Engine) SampleWB(ctx context.Context, id int, rec Recipe, area *Rect) (*WhiteBalance, error) {
 	resolved, src, err := e.prepare(ctx, id, rec)
 	if err != nil {
@@ -1121,8 +1113,7 @@ func (e *Engine) LensSearch(q string, limit int) []LensCandidate {
 	return e.lenses().Search(q, limit)
 }
 
-// SetLensMapping remembers (or, with an empty profile, forgets) which Lensfun
-// profile an EXIF lens name means, then requeues edits whose hash changed.
+// SetLensMapping remembers (or, with an empty profile, forgets) a lens name's Lensfun profile and requeues edits whose hash changed.
 func (e *Engine) SetLensMapping(ctx context.Context, exifLens, profile string) error {
 	exifLens = strings.TrimSpace(exifLens)
 	if exifLens == "" {
@@ -1146,8 +1137,7 @@ func (e *Engine) SetLensMapping(ctx context.Context, exifLens, profile string) e
 	return err
 }
 
-// sourceFromAbs describes a source file; key names it inside the fingerprint
-// (the media-relative path, or staging/<id>/<name> for Unsorted files).
+// sourceFromAbs describes a source file; key names it in the fingerprint (media-relative path or staging/<id>/<name>).
 func sourceFromAbs(abs, key string) (*Source, error) {
 	fi, err := os.Stat(abs)
 	if err != nil {
@@ -1231,8 +1221,7 @@ func (e *Engine) previewSource(ctx context.Context, src *Source, resolved Recipe
 	return &PreviewResult{Data: data, Quality: quality, FullW: fullW, FullH: fullH}, nil
 }
 
-// renderProxyFrame renders the whole frame from the proxy, fitted to
-// maxW×maxH (0 means no limit). The caller holds a preview slot.
+// renderProxyFrame renders the whole frame from the proxy fitted to maxW×maxH (0 = no limit); caller holds a preview slot.
 func (e *Engine) renderProxyFrame(ctx context.Context, src *Source, resolved Recipe, maxW, maxH int, quality string) (*Image, string, int, int, error) {
 	tm := timingsFrom(ctx)
 	decodeRecipe, pre, actual, err := e.wbPlan(ctx, src, resolved, quality)
@@ -1315,8 +1304,7 @@ func (e *Engine) sampleSource(ctx context.Context, src *Source, resolved Recipe,
 	return wbFromSample(sum, from)
 }
 
-// renderLinear renders the full-resolution frame in linear Rec.2020; it is
-// shared by publishing and export.
+// renderLinear renders the full-resolution frame in linear Rec.2020 for both publishing and export.
 func (e *Engine) renderLinear(ctx context.Context, src *Source, r Recipe) (*Image, error) {
 	e.full.drop()
 	lens, err := e.lensFor(ctx, src, r)
@@ -1343,10 +1331,7 @@ func (e *Engine) renderLinear(ctx context.Context, src *Source, r Recipe) (*Imag
 	return img, nil
 }
 
-// saveRecipe stores a new revision of a photo's recipe and queues a render
-// when the hash changed. expected is the revision the caller edited.
-// Interactive saves (the editor) render ahead of batch work, so a long batch
-// never leaves the photo someone is editing stuck in the queue.
+// saveRecipe stores a new recipe revision (expected = edited revision) and queues a render on hash change; interactive saves jump the batch queue.
 func (e *Engine) saveRecipe(ctx context.Context, id int, rec Recipe, expected int64, label string, interactive bool) error {
 	priority := 0
 	if interactive {
@@ -1432,8 +1417,7 @@ func (e *Engine) saveRecipe(ctx context.Context, id int, rec Recipe, expected in
 
 const warmTimeout = 3 * time.Minute
 
-// Warm decodes the full-resolution image in the background while the user
-// looks at the fit preview, so the first 1:1 view does not wait for it.
+// Warm decodes the full-resolution image in the background during the fit preview so the first 1:1 view doesn't wait.
 func (e *Engine) Warm(id int, rec Recipe) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), warmTimeout)
@@ -1456,8 +1440,7 @@ func (e *Engine) WarmStaged(sid string, rec Recipe) {
 	}()
 }
 
-// warmSource skips warming while a publish or export holds renderMu, so two
-// full-resolution decodes never compete for memory.
+// warmSource skips warming while publish/export holds renderMu, so two full-resolution decodes never compete for memory.
 func (e *Engine) warmSource(ctx context.Context, src *Source, resolved Recipe) {
 	if !e.renderMu.TryLock() {
 		return

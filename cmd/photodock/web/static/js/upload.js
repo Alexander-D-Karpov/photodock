@@ -37,9 +37,7 @@
             n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.png') || n.endsWith('.arw');
     }
 
-    // Pull real File objects out of a drop. Some sources (and older browsers)
-    // populate dataTransfer.items but not .files; dragging straight from a
-    // camera/phone over MTP/PTP populates neither (no bytes reach the browser).
+    // Extract Files from a drop, falling back to dataTransfer.items (MTP/PTP drags provide neither).
     function collectDroppedFiles(dt) {
         if (dt.files && dt.files.length) return Array.from(dt.files);
         const out = [];
@@ -112,9 +110,7 @@
         returnFromEditor();
     }
 
-    // Coming back from the editor (#staged=<id>) reopens that file, and since
-    // edited previews re-render in the background, the list is refreshed a few
-    // times so the new previews replace the stale ones.
+    // Returning from the editor (#staged=<id>) reopens the file and refreshes until previews re-render.
     function returnFromEditor() {
         const m = location.hash.match(/^#staged=([0-9]+-[0-9a-f]+)$/);
         if (m) {

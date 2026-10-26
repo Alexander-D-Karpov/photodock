@@ -119,8 +119,7 @@ func TestFastWBNeutralises(t *testing.T) {
 	}
 }
 
-// TestNewFieldsKeepOldHashes guards the promise that Ф1 fields are neutral at
-// zero: a recipe saved before them must hash identically.
+// TestNewFieldsKeepOldHashes guards that Ф1 fields are neutral at zero, so older recipes hash identically.
 func TestNewFieldsKeepOldHashes(t *testing.T) {
 	r, _ := ParseRecipe([]byte(`{"geometry":{"rotate":90},"tone":{"exposure":0.3}}`))
 	res, _ := Resolve(r, 1)

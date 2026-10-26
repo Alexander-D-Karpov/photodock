@@ -52,8 +52,7 @@ func TestTempTintRoundTrip(t *testing.T) {
 	}
 }
 
-// Tint names the illuminant correction like Lightroom: positive tint assumes
-// a greener (above-locus) light, so the corrected image turns magenta.
+// Tint follows Lightroom: positive tint assumes a greener light, so the corrected image turns magenta.
 func TestTintDirection(t *testing.T) {
 	_, v0 := xyToUV(TempTintToXY(5000, 0))
 	_, vGreen := xyToUV(TempTintToXY(5000, 50))

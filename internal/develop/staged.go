@@ -15,9 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Editing files that are still in Unsorted (staging). The recipe lives in
-// staged_edits, staging previews are re-rendered from it, and on commit the
-// recipe is adopted by the newly created photo.
+// Editing Unsorted (staging) files: recipe lives in staged_edits, drives staging previews, and is adopted by the photo on commit.
 
 const (
 	stagingViewQuality    = 92
@@ -183,9 +181,7 @@ func (e *Engine) SampleWBStaged(ctx context.Context, sid string, rec Recipe, are
 	return e.sampleSource(ctx, src, resolved, area)
 }
 
-// RotateStaged rotates an edited staged file by changing its recipe (crop and
-// masks included). It reports false when the file has no recipe, so the
-// caller falls back to the legacy staging rotation.
+// RotateStaged rotates an edited staged file via its recipe (crop, masks); false if no recipe, so caller uses legacy rotation.
 func (e *Engine) RotateStaged(ctx context.Context, sid string, delta int) (bool, error) {
 	row, err := e.loadStaged(ctx, sid)
 	if err != nil {
@@ -220,9 +216,7 @@ func (e *Engine) scheduleStagingPreview(sid string) {
 	}()
 }
 
-// RenderStagingPreviews rewrites preview.jpg and view.jpg in the staging dir
-// from the recipe (or from the legacy rotation when there is none) and bumps
-// edit_rev so the Unsorted grid refetches them.
+// RenderStagingPreviews rewrites staging preview.jpg/view.jpg from the recipe (or legacy rotation) and bumps edit_rev for refetch.
 func (e *Engine) RenderStagingPreviews(ctx context.Context, sid string) error {
 	lock := e.dec.keyLock("staging:" + sid)
 	lock.Lock()
@@ -298,8 +292,7 @@ func rotateNormPoint(x, y float64, dir int) (float64, float64) {
 	return y, 1 - x
 }
 
-// RotateRecipe turns the visible result by dir (±90) degrees, carrying the
-// crop and masks along; it mirrors rotate() in the editor's main.js.
+// RotateRecipe turns the result by dir (±90) degrees, carrying crop and masks; mirrors rotate() in the editor's main.js.
 func RotateRecipe(r Recipe, dir int) Recipe {
 	g := &r.Geometry
 	step := dir
