@@ -3,9 +3,14 @@ package handlers
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -119,3 +124,76 @@ func (pw *privateWriter) Write(b []byte) (int, error) {
 }
 
 func (pw *privateWriter) Unwrap() http.ResponseWriter { return pw.ResponseWriter }
+
+// initPrivateCache loads (or creates) the cache-name secret and moves private photos' files to keyed names.
+func (h *Handlers) initPrivateCache(ctx context.Context) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		log.Printf("private cache: %v", err)
+		return
+	}
+	_, _ = h.db.Pool().Exec(ctx, `CREATE TABLE IF NOT EXISTS app_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+	_, _ = h.db.Pool().Exec(ctx, `INSERT INTO app_secrets (name, value) VALUES ('cache_key', $1) ON CONFLICT DO NOTHING`, hex.EncodeToString(buf))
+	var secret string
+	if err := h.db.Pool().QueryRow(ctx, `SELECT value FROM app_secrets WHERE name = 'cache_key'`).Scan(&secret); err != nil {
+		log.Printf("private cache: %v", err)
+		return
+	}
+	h.thumbSvc.SetPrivacy(secret, func(id int) bool {
+		var private bool
+		_ = h.db.Pool().QueryRow(context.Background(),
+			"SELECT COALESCE(folder_id IN "+privateFolderIDs+", false) FROM photos WHERE id = $1", id).Scan(&private)
+		return private
+	})
+	h.syncPrivate(ctx)
+}
+
+// syncPrivate re-files all private photos and drops public-named OG cards of private folders.
+func (h *Handlers) syncPrivate(ctx context.Context) {
+	h.syncPhotosPrivacy(ctx, "folder_id IN "+privateFolderIDs)
+	rows, err := h.db.Pool().Query(ctx, privateFolderIDs)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int
+		if rows.Scan(&id) == nil {
+			matches, _ := filepath.Glob(filepath.Join(h.cfg.CacheDir, "ogcard", fmt.Sprintf("folder_%d_*", id)))
+			for _, m := range matches {
+				_ = os.Remove(m)
+			}
+		}
+	}
+}
+
+// syncPhotosPrivacy renames cached files of the photos matching where to fit their current privacy.
+func (h *Handlers) syncPhotosPrivacy(ctx context.Context, where string, args ...any) {
+	rows, err := h.db.Pool().Query(ctx, "SELECT id FROM photos WHERE "+where, args...)
+	if err != nil {
+		return
+	}
+	var ids []int
+	for rows.Next() {
+		var id int
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		h.thumbSvc.SyncPrivacy(id)
+	}
+}
+
+// syncFolderPrivacy re-files every photo in a folder subtree after its privacy changed.
+func (h *Handlers) syncFolderPrivacy(ctx context.Context, folderID int) {
+	h.syncPhotosPrivacy(ctx, `folder_id IN (SELECT f.id FROM folders f, folders root
+		WHERE root.id = $1 AND (f.path = root.path OR starts_with(f.path, root.path || '/')))`, folderID)
+	for _, pat := range []string{"folder_%d_*", "folder_%d-*"} {
+		matches, _ := filepath.Glob(filepath.Join(h.cfg.CacheDir, "ogcard", fmt.Sprintf(pat, folderID)))
+		for _, m := range matches {
+			_ = os.Remove(m)
+		}
+	}
+}

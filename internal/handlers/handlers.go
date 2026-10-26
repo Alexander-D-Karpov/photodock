@@ -181,7 +181,7 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 		log.Printf("template load error: %v", err)
 	}
 
-	return &Handlers{
+	h := &Handlers{
 		db:       db,
 		cfg:      cfg,
 		thumbSvc: thumbSvc,
@@ -191,6 +191,10 @@ func New(db *database.DB, cfg *config.Config, thumbSvc *services.ThumbnailServic
 		webFS:    webFS,
 		uploads:  make(map[string]*ChunkedUpload),
 	}
+	if db != nil && thumbSvc != nil {
+		h.initPrivateCache(context.Background())
+	}
+	return h
 }
 
 func (x *IntPtrOrString) UnmarshalJSON(b []byte) error {
@@ -974,6 +978,7 @@ func (h *Handlers) adminUpdateFolder(w http.ResponseWriter, r *http.Request) {
 
 	private := r.FormValue("private") == "on"
 	_, _ = h.db.Pool().Exec(r.Context(), "UPDATE folders SET name = $1, private = $2, updated_at = NOW() WHERE id = $3", name, private, id)
+	h.syncFolderPrivacy(r.Context(), id)
 	http.Redirect(w, r, "/admin/folders", http.StatusSeeOther)
 }
 
@@ -1118,6 +1123,7 @@ func (h *Handlers) adminUpdatePhoto(w http.ResponseWriter, r *http.Request) {
 		`UPDATE photos SET title = NULLIF($1, ''), description = NULLIF($2, ''), 
 		note = NULLIF($3, ''), folder_id = $4, updated_at = NOW() WHERE id = $5`,
 		r.FormValue("title"), r.FormValue("description"), r.FormValue("note"), folderID, id)
+	h.thumbSvc.SyncPrivacy(id)
 
 	http.Redirect(w, r, fmt.Sprintf("/admin/photos/%d", id), http.StatusSeeOther)
 }
@@ -1140,6 +1146,7 @@ func (h *Handlers) adminMovePhoto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = h.db.Pool().Exec(r.Context(), "UPDATE photos SET folder_id = $1, updated_at = NOW() WHERE id = $2", folderID, id)
+	h.thumbSvc.SyncPrivacy(id)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -2448,7 +2455,11 @@ func (h *Handlers) folderOGCard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cardDir := filepath.Join(h.cfg.CacheDir, "ogcard")
-	cardPath := filepath.Join(cardDir, fmt.Sprintf("folder_%d_%s.jpg", folderID, strings.Join(keyParts, "-")))
+	cardName := fmt.Sprintf("folder_%d_%s.jpg", folderID, strings.Join(keyParts, "-"))
+	if _, isPrivate := w.(*privateWriter); isPrivate {
+		cardName = fmt.Sprintf("folder_%d-%s_%s.jpg", folderID, h.thumbSvc.SecretKey("folder", folderID), strings.Join(keyParts, "-"))
+	}
+	cardPath := filepath.Join(cardDir, cardName)
 
 	if _, err := os.Stat(cardPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(cardDir, 0755); err != nil {

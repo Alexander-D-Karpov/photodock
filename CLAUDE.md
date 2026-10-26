@@ -74,7 +74,9 @@ Notable admin ops: `POST /admin/reprocess` (rebuild exif/dims/blurhash),
 - **Private folders** (`folders.private`, inherited by subfolders via path prefix): every public
   route and `/api/*` must filter with `photoVisible`/`folderVisible` (`handlers/private.go`).
   Admin sees them via basic auth or the `photodock_admin` cookie set by `adminAuth`; private
-  responses are sent `Cache-Control: private, no-store` so nginx never caches them.
+  responses are sent `Cache-Control: private, no-store` so nginx never caches them. Prod nginx
+  serves `CACHE_DIR` files directly (`/thumb/small/<id>.jpg`), so private derivatives are named
+  `<id>-<HMAC key>` (`services/private_cache.go`); call `SyncPrivacy` after any privacy/folder change.
 - **Deploy is server-coupled**: production runs on `akarpov.ru` (Arch, systemd,
   nginx, Postgres). Server/DNS/logrotate/Cloudflare steps that can't be done from
   a checkout are documented in `deploy/RUNBOOK.md` — don't attempt to SSH/deploy

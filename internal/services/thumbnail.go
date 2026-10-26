@@ -28,6 +28,8 @@ type ThumbnailService struct {
 	mediaRoot   string
 	cacheDir    string
 	existsCache sync.Map
+	secret      []byte
+	isPrivate   func(photoID int) bool
 }
 
 func NewThumbnailService(mediaRoot, cacheDir string) *ThumbnailService {
@@ -84,7 +86,7 @@ func (s *ThumbnailService) GetThumbnailPathByID(photoID int, photoPath, size str
 	if strings.HasSuffix(strings.ToLower(photoPath), ".png") {
 		ext = ".png"
 	}
-	thumbPath := filepath.Join(s.cacheDir, size, fmt.Sprintf("%d%s", photoID, ext))
+	thumbPath := filepath.Join(s.cacheDir, size, s.stem(photoID)+ext)
 
 	if _, ok := s.existsCache.Load(thumbPath); ok {
 		return thumbPath, nil
@@ -246,7 +248,7 @@ func placeholderDims(width, height int) (int, int) {
 }
 
 func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string, width, height int) (string, error) {
-	placeholderPath := filepath.Join(s.cacheDir, "placeholder", fmt.Sprintf("%d.png", photoID))
+	placeholderPath := filepath.Join(s.cacheDir, "placeholder", s.stem(photoID)+".png")
 
 	if _, ok := s.existsCache.Load(placeholderPath); ok {
 		return placeholderPath, nil
@@ -278,11 +280,17 @@ func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string, 
 }
 
 func (s *ThumbnailService) DeleteThumbnailsByID(photoID int) error {
+	stems := []string{fmt.Sprintf("%d", photoID)}
+	if len(s.secret) > 0 {
+		stems = append(stems, s.privateStem(photoID))
+	}
 	for _, size := range []string{"small", "medium", "large", "placeholder"} {
 		for _, ext := range []string{".jpg", ".png"} {
-			path := filepath.Join(s.cacheDir, size, fmt.Sprintf("%d%s", photoID, ext))
-			_ = os.Remove(path)
-			s.existsCache.Delete(path)
+			for _, stem := range stems {
+				path := filepath.Join(s.cacheDir, size, stem+ext)
+				_ = os.Remove(path)
+				s.existsCache.Delete(path)
+			}
 		}
 	}
 	return nil
@@ -380,7 +388,7 @@ func (s *ThumbnailService) AnalyzeColors(photoPath string) (*models.ColorInfo, e
 
 // DevelopDir is where the develop engine publishes a photo's rendered derivatives, one subdir per hash.
 func (s *ThumbnailService) DevelopDir(photoID int) string {
-	return filepath.Join(s.cacheDir, "develop", fmt.Sprintf("%d", photoID))
+	return filepath.Join(s.cacheDir, "develop", s.stem(photoID))
 }
 
 // PlaceholderDims exposes placeholderDims to the develop engine.

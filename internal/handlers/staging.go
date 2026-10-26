@@ -555,6 +555,7 @@ func (h *Handlers) StartJanitor(ctx context.Context) {
 				return
 			case <-t.C:
 				h.CleanupStaging(ctx)
+				h.syncPrivate(ctx)
 			}
 		}
 	}()

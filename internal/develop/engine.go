@@ -688,7 +688,9 @@ func (e *Engine) gc(ctx context.Context) {
 		if !ent.IsDir() {
 			continue
 		}
-		id, err := strconv.Atoi(ent.Name())
+		// Private photos use "<id>-<key>" dirs.
+		idPart, _, _ := strings.Cut(ent.Name(), "-")
+		id, err := strconv.Atoi(idPart)
 		if err != nil {
 			continue
 		}
