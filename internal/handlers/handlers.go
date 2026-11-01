@@ -577,8 +577,8 @@ func (h *Handlers) publicPhotoByID(w http.ResponseWriter, r *http.Request) {
 	h.renderPhoto(w, r, photo)
 }
 
-// adjacentOriginals returns edit-versioned /original URLs to prefetch; unversioned ones could be stale.
-func (h *Handlers) adjacentOriginals(ctx context.Context, ids ...int) []string {
+// Prefetch only small, edit-versioned previews of the neighboring photos.
+func (h *Handlers) adjacentThumbnails(ctx context.Context, ids ...int) []string {
 	out := make([]string, len(ids))
 	for i, id := range ids {
 		if id <= 0 {
@@ -586,7 +586,7 @@ func (h *Handlers) adjacentOriginals(ctx context.Context, ids ...int) []string {
 		}
 		var hash string
 		_ = h.db.Pool().QueryRow(ctx, "SELECT COALESCE(edit_hash, '') FROM photos WHERE id = $1", id).Scan(&hash)
-		out[i] = versionedURL(fmt.Sprintf("/original/%d", id), hash)
+		out[i] = versionedURL(fmt.Sprintf("/thumb/small/%d", id), hash)
 	}
 	return out
 }
@@ -600,7 +600,7 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 	}
 
 	prevURL, nextURL, prevID, nextID := h.getAdjacentPhotoInfo(ctx, photo)
-	originals := h.adjacentOriginals(ctx, prevID, nextID)
+	previews := h.adjacentThumbnails(ctx, prevID, nextID)
 	breadcrumbs := h.getPhotoBreadcrumbs(ctx, photo)
 	position, total := h.getPhotoPosition(ctx, photo)
 
@@ -643,8 +643,8 @@ func (h *Handlers) renderPhoto(w http.ResponseWriter, r *http.Request, photo *mo
 		"NextURL":       nextURL,
 		"PrevID":        prevID,
 		"NextID":        nextID,
-		"PrevOriginal":  originals[0],
-		"NextOriginal":  originals[1],
+		"PrevPreview":   previews[0],
+		"NextPreview":   previews[1],
 		"Breadcrumbs":   breadcrumbs,
 		"Title":         title,
 		"FolderURL":     folderURL,
@@ -688,7 +688,7 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 	size := r.PathValue("size")
 	id, _ := strconv.Atoi(r.PathValue("id"))
 
-	if size != "small" && size != "medium" && size != "large" {
+	if _, ok := services.ThumbnailWidth(size); !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -716,6 +716,17 @@ func (h *Handlers) serveThumbnail(w http.ResponseWriter, r *http.Request) {
 		setDerivedCache(w, r, editHash)
 		w.Header().Set("Content-Type", "image/jpeg")
 		http.ServeFile(w, r, file)
+		return
+	}
+	if file, ok := h.publishedFile(id, editHash, "full.jpg"); ok && !unedited {
+		thumbPath, err := h.thumbSvc.GetEditedThumbnailPath(id, file, size)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		setDerivedCache(w, r, editHash)
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeFile(w, r, thumbPath)
 		return
 	}
 

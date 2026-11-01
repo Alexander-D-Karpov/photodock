@@ -1,7 +1,10 @@
 (function() {
     const GAP = 4;
     const MIN_WIDTH = 100;
-    const ASPECT_TOLERANCE = 0.02;
+    const MAX_IMAGE_REQUESTS = 4;
+    let imageObserver = null;
+    let activeImages = 0;
+    const imageQueue = [];
 
     function targetRowHeight() {
         const w = window.innerWidth;
@@ -97,12 +100,7 @@
         grid.querySelectorAll('.justified-row').forEach(r => r.remove());
         grid.appendChild(frag);
         if (trigger) grid.appendChild(trigger);
-    }
-
-    let relayoutTimer = null;
-    function scheduleRelayout() {
-        clearTimeout(relayoutTimer);
-        relayoutTimer = setTimeout(() => layoutJustified(), 60);
+        updateVisibleImages();
     }
 
     function observeGrid() {
@@ -138,95 +136,76 @@
         }
     }
 
-    // Thumbnails are auto-oriented, so their natural size beats the DB aspect (wrong for portraits).
-    function correctAspect(container, img) {
-        if (!img.naturalWidth || !img.naturalHeight) return;
-        const item = container.closest('.photo-item');
-        if (!item) return;
-        const natural = img.naturalWidth / img.naturalHeight;
-        const current = itemAspect(item);
-        if (Math.abs(natural - current) / current > ASPECT_TOLERANCE) {
-            item._ar = natural;
-            container.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight;
-            scheduleRelayout();
+    // Keep the placeholder and image in the same fixed box; loading must never rebuild the rows.
+    function loadImage(container) {
+        const current = container.querySelector('.full-image');
+        if (!current || !container.dataset.small || container.clientWidth <= 0) return;
+        const size = PhotoImages.choose(container.clientWidth, Number(container.dataset.width));
+        if (size.width <= (container._loadedWidth || 0) || size.width <= (container._requestedWidth || 0)) return;
+
+        container._requestedWidth = size.width;
+        imageQueue.push({ container, size });
+        drainImageQueue();
+    }
+
+    // Avoid starting dozens of server-side resizes for photos scrolled past or left behind.
+    function drainImageQueue() {
+        while (activeImages < MAX_IMAGE_REQUESTS && imageQueue.length) {
+            const { container, size } = imageQueue.shift();
+            if (container.dataset.inView !== 'true' || container._requestedWidth !== size.width) {
+                if (container._requestedWidth === size.width) container._requestedWidth = 0;
+                continue;
+            }
+            activeImages++;
+            requestImage(container, size);
         }
     }
 
-    // Preload medium fully, then swap src so the cached higher-res image paints with no flash.
-    function upgradeToMedium(container) {
-        if (container.dataset.upgraded) return;
-        const img = container.querySelector('.full-image');
-        if (!img) return;
-        const mediumSrc = img.dataset.medium;
-        if (!mediumSrc || img.src.indexOf(mediumSrc) !== -1) {
-            container.dataset.upgraded = 'true';
-            return;
-        }
-        container.dataset.upgraded = 'pending';
-        const hi = new Image();
-        hi.onload = () => {
-            img.src = mediumSrc;
-            container.dataset.upgraded = 'true';
-        };
-        hi.onerror = () => { container.dataset.upgraded = ''; };
-        hi.src = mediumSrc;
-    }
-
-    let mediumObserver = null;
-    function initProgressiveUpgrade() {
-        const containers = document.querySelectorAll('.progressive-image:not([data-observed-medium])');
-        if (!('IntersectionObserver' in window)) {
-            containers.forEach(c => {
-                c.dataset.observedMedium = 'true';
-                upgradeToMedium(c);
-            });
-            return;
-        }
-        if (!mediumObserver) {
-            mediumObserver = new IntersectionObserver((entries, obs) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        upgradeToMedium(entry.target);
-                        obs.unobserve(entry.target);
-                    }
-                });
-            }, { rootMargin: '300px 0px' });
-        }
-        containers.forEach(c => {
-            c.dataset.observedMedium = 'true';
-            mediumObserver.observe(c);
+    function requestImage(container, size) {
+        const current = container.querySelector('.full-image');
+        const image = new Image();
+        image.className = 'full-image';
+        image.alt = current.alt;
+        image.decoding = 'async';
+        image.src = PhotoImages.url(container.dataset.small, size.name);
+        PhotoImages.ready(image).then(() => {
+            if (size.width <= (container._loadedWidth || 0)) return;
+            container._loadedWidth = size.width;
+            if (container._requestedWidth === size.width) container._requestedWidth = 0;
+            const old = container.querySelector('.full-image');
+            if (old) old.replaceWith(image);
+            if (!container.classList.contains('loaded')) {
+                requestAnimationFrame(() => requestAnimationFrame(() => container.classList.add('loaded')));
+            }
+        }).catch(() => {
+            if (container._requestedWidth === size.width) container._requestedWidth = 0;
+        }).finally(() => {
+            activeImages--;
+            drainImageQueue();
         });
+    }
+
+    function updateVisibleImages() {
+        document.querySelectorAll('.progressive-image[data-in-view="true"]').forEach(loadImage);
     }
 
     function initLazyLoading() {
-        document.querySelectorAll('.progressive-image').forEach(container => {
-            const fullImage = container.querySelector('.full-image');
-            const placeholder = container.querySelector('.placeholder');
-            if (!fullImage) return;
-
-            if (placeholder) {
-                if (placeholder.complete && placeholder.naturalHeight > 0) {
-                    placeholder.classList.add('ready');
-                } else {
-                    placeholder.addEventListener('load', function() {
-                        this.classList.add('ready');
-                    }, { once: true });
-                }
-            }
-
-            const onLoaded = () => {
-                container.classList.add('loaded');
-                correctAspect(container, fullImage);
-            };
-
-            if (fullImage.complete && fullImage.naturalHeight > 0) {
-                onLoaded();
-            } else {
-                fullImage.addEventListener('load', onLoaded, { once: true });
-                fullImage.addEventListener('error', () => container.classList.add('loaded'), { once: true });
+        if ('IntersectionObserver' in window && !imageObserver) {
+            imageObserver = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    entry.target.dataset.inView = String(entry.isIntersecting);
+                    if (entry.isIntersecting) loadImage(entry.target);
+                });
+            }, { rootMargin: '300px 0px' });
+        }
+        document.querySelectorAll('.progressive-image:not([data-observed-image])').forEach(container => {
+            container.dataset.observedImage = 'true';
+            if (imageObserver) imageObserver.observe(container);
+            else {
+                container.dataset.inView = 'true';
+                loadImage(container);
             }
         });
-        initProgressiveUpgrade();
     }
 
     function initFolderLazyLoading() {

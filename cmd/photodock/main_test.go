@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/Alexander-D-Karpov/photodock/internal/develop"
 	"github.com/Alexander-D-Karpov/photodock/internal/handlers"
 	"github.com/Alexander-D-Karpov/photodock/internal/models"
+	"github.com/Alexander-D-Karpov/photodock/internal/services"
 )
 
 // newTestServer builds a mux on the real embedded FS with nil db/thumb/scan, so only DB-free routes work.
@@ -70,7 +73,7 @@ func TestEmbeddedStaticAssetsPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{
-		"js/gallery.js", "js/index.js", "css/public.css", "icon.webp",
+		"js/images.js", "js/gallery.js", "js/index.js", "js/viewer.js", "css/public.css", "icon.webp",
 		"css/develop.css", "js/develop/main.js", "js/develop/api.js", "js/develop/panels.js",
 		"js/develop/preview.js", "js/develop/crop.js", "js/develop/curve.js",
 		"js/develop/histogram.js", "js/develop/slider.js", "js/develop/schema.js",
@@ -80,6 +83,23 @@ func TestEmbeddedStaticAssetsPresent(t *testing.T) {
 	} {
 		if _, err := fs.Stat(staticFS, name); err != nil {
 			t.Errorf("missing embedded static asset %q: %v", name, err)
+		}
+	}
+}
+
+func TestResponsiveImageWidthsMatchServer(t *testing.T) {
+	js, err := webFS.ReadFile("web/static/js/images.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches := regexp.MustCompile(`\['(w[0-9]+|large)', ([0-9]+)\]`).FindAllStringSubmatch(string(js), -1)
+	if len(matches) < 10 {
+		t.Fatalf("found only %d responsive image widths", len(matches))
+	}
+	for _, match := range matches {
+		width, _ := strconv.Atoi(match[2])
+		if got, ok := services.ThumbnailWidth(match[1]); !ok || got != width {
+			t.Errorf("client variant %s = %d, server = %d (valid: %v)", match[1], width, got, ok)
 		}
 	}
 }
@@ -99,7 +119,7 @@ func TestTemplatesExecuteWithEditHash(t *testing.T) {
 	pages := map[string]map[string]interface{}{
 		"public/index.html":  {"Photos": photos, "Folders": []models.Folder{folder}, "TotalSize": int64(0)},
 		"public/folder.html": {"Photos": photos, "Folder": folder, "Subfolders": []models.Folder{folder}, "Breadcrumbs": []models.Folder{}, "TotalSize": int64(0)},
-		"public/photo.html": {"Photo": &photos[0], "BaseURL": "https://example.test", "PrevOriginal": "/original/2?v=x",
+		"public/photo.html": {"Photo": &photos[0], "BaseURL": "https://example.test", "PrevPreview": "/thumb/small/2?v=x",
 			"Develop": develop.Summarize(develop.Recipe{Tone: develop.Tone{Exposure: 0.5}, Lens: develop.Lens{Enabled: true}})},
 		"admin/photos.html":      {"Photos": photos, "Folders": []models.Folder{folder}, "TotalPages": 1, "CurrentPage": 1},
 		"admin/folder_edit.html": {"Photos": photos, "Folder": folder, "AllFolders": []models.Folder{folder}},
@@ -114,6 +134,19 @@ func TestTemplatesExecuteWithEditHash(t *testing.T) {
 		out := buf.String()
 		if name == "public/photo.html" && (!strings.Contains(out, "Development") || !strings.Contains(out, "Lens correction") || !strings.Contains(out, "unedited=1")) {
 			t.Errorf("photo page is missing the develop summary")
+		}
+		if name == "public/photo.html" {
+			for _, want := range []string{`aspect-ratio: 300 / 200`, `width: min(100%, 300px`, `/thumb/small/1?v=` + hash, `prevPreview:`} {
+				if !strings.Contains(out, want) {
+					t.Errorf("photo page is missing %q", want)
+				}
+			}
+			if strings.Contains(out, `rel="preload" href="/thumb/large/`) || strings.Contains(out, `prevOriginal:`) || strings.Contains(out, `data-original=`) {
+				t.Error("photo page still eagerly loads full-size images")
+			}
+		}
+		if (name == "public/index.html" || name == "public/folder.html") && !strings.Contains(out, `data-small="/thumb/small/1?v=`+hash+`"`) {
+			t.Errorf("%s is missing the versioned responsive image source", name)
 		}
 		if name != "admin/photo_edit.html" && !strings.Contains(out, "?v="+hash) {
 			t.Errorf("%s: no versioned URL for the edited photo", name)

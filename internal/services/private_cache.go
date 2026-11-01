@@ -40,6 +40,9 @@ func (s *ThumbnailService) SyncPrivacy(photoID int) {
 	if len(s.secret) == 0 {
 		return
 	}
+	lock := s.cacheLock(photoID)
+	lock.Lock()
+	defer lock.Unlock()
 	from, to := strconv.Itoa(photoID), s.privateStem(photoID)
 	if s.stem(photoID) == from {
 		from, to = to, from
@@ -53,7 +56,7 @@ func (s *ThumbnailService) SyncPrivacy(photoID int) {
 		s.existsCache.Delete(a)
 		s.existsCache.Delete(b)
 	}
-	for _, dir := range []string{"small", "medium", "large", "placeholder"} {
+	for _, dir := range derivativeDirs {
 		for _, ext := range []string{".jpg", ".png"} {
 			move(filepath.Join(s.cacheDir, dir, from+ext), filepath.Join(s.cacheDir, dir, to+ext))
 		}

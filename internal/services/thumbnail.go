@@ -15,6 +15,7 @@ import (
 
 	"github.com/Alexander-D-Karpov/photodock/internal/models"
 	"github.com/disintegration/imaging"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -22,27 +23,51 @@ const (
 	stagingViewWidth    = 2560
 )
 
-var thumbSizes = []string{"small", "medium", "large"}
+var (
+	// The legacy sizes are eagerly generated; the responsive sizes are generated on demand.
+	thumbSizes  = []string{"small", "w320", "w480", "w640", "w800", "medium", "w1024", "w1280", "w1600", "w2048", "large", "w3200", "w3840", "w5120", "w7680"}
+	thumbWidths = map[string]int{
+		"small": 300, "w320": 320, "w480": 480, "w640": 640, "w800": 800, "medium": 1000, "w1024": 1024,
+		"w1280": 1280, "w1600": 1600, "w2048": 2048, "large": 2560,
+		"w3200": 3200, "w3840": 3840, "w5120": 5120, "w7680": 7680,
+	}
+	derivativeDirs = append(append([]string{}, thumbSizes...), "placeholder")
+)
+
+// ThumbnailWidth is also used by the HTTP handler to reject arbitrary cache paths.
+func ThumbnailWidth(size string) (int, bool) {
+	width, ok := thumbWidths[size]
+	return width, ok
+}
 
 type ThumbnailService struct {
-	mediaRoot   string
-	cacheDir    string
-	existsCache sync.Map
-	secret      []byte
-	isPrivate   func(photoID int) bool
+	mediaRoot         string
+	cacheDir          string
+	cacheLocks        [64]sync.RWMutex
+	existsCache       sync.Map
+	thumbnailRequests singleflight.Group
+	thumbnailSlots    chan struct{}
+	secret            []byte
+	isPrivate         func(photoID int) bool
+}
+
+// Serialize a photo's cache mutations with generation, without blocking unrelated photos.
+func (s *ThumbnailService) cacheLock(photoID int) *sync.RWMutex {
+	return &s.cacheLocks[uint(photoID)%uint(len(s.cacheLocks))]
 }
 
 func NewThumbnailService(mediaRoot, cacheDir string) *ThumbnailService {
-	_ = os.MkdirAll(filepath.Join(cacheDir, "small"), 0755)
-	_ = os.MkdirAll(filepath.Join(cacheDir, "medium"), 0755)
-	_ = os.MkdirAll(filepath.Join(cacheDir, "large"), 0755)
+	for _, size := range thumbSizes {
+		_ = os.MkdirAll(filepath.Join(cacheDir, size), 0755)
+	}
 	_ = os.MkdirAll(filepath.Join(cacheDir, "placeholder"), 0755)
 	_ = os.MkdirAll(filepath.Join(cacheDir, "raw"), 0755)
 	_ = os.MkdirAll(filepath.Join(cacheDir, "rawdev"), 0755)
 	rawDevelopers()
 	return &ThumbnailService{
-		mediaRoot: mediaRoot,
-		cacheDir:  cacheDir,
+		mediaRoot:      mediaRoot,
+		cacheDir:       cacheDir,
+		thumbnailSlots: make(chan struct{}, 2),
 	}
 }
 
@@ -82,34 +107,98 @@ func resizeToWidth(img image.Image, width int) image.Image {
 }
 
 func (s *ThumbnailService) GetThumbnailPathByID(photoID int, photoPath, size string, rotation int) (string, error) {
+	lock := s.cacheLock(photoID)
+	lock.RLock()
+	defer lock.RUnlock()
+	width, ok := ThumbnailWidth(size)
+	if !ok {
+		return "", fmt.Errorf("invalid thumbnail size %q", size)
+	}
 	ext := ".jpg"
 	if strings.HasSuffix(strings.ToLower(photoPath), ".png") {
 		ext = ".png"
 	}
 	thumbPath := filepath.Join(s.cacheDir, size, s.stem(photoID)+ext)
 
-	if _, ok := s.existsCache.Load(thumbPath); ok {
-		return thumbPath, nil
-	}
-
-	if _, err := os.Stat(thumbPath); err == nil {
-		s.existsCache.Store(thumbPath, struct{}{})
-		return thumbPath, nil
-	}
-
 	srcPath := filepath.Join(s.mediaRoot, photoPath)
-	if err := s.generateThumbnail(srcPath, thumbPath, size, rotation); err != nil {
+	// Reuse the already-oriented large derivative where possible, especially for RAWs.
+	if width <= 2560 && size != "small" && size != "medium" && size != "large" {
+		largePath := filepath.Join(s.cacheDir, "large", s.stem(photoID)+ext)
+		if _, err := os.Stat(largePath); err == nil {
+			srcPath, rotation = largePath, 0
+		}
+	}
+	return s.cachedThumbnail(srcPath, thumbPath, size, rotation, true)
+}
+
+// GetEditedThumbnailPath derives a responsive size from the published edit, never the unedited source.
+func (s *ThumbnailService) GetEditedThumbnailPath(photoID int, publishedFull, size string) (string, error) {
+	lock := s.cacheLock(photoID)
+	lock.RLock()
+	defer lock.RUnlock()
+	width, ok := ThumbnailWidth(size)
+	if !ok {
+		return "", fmt.Errorf("invalid thumbnail size %q", size)
+	}
+	dir := filepath.Dir(publishedFull)
+	src := publishedFull
+	if width <= 2560 {
+		if large := filepath.Join(dir, "large.jpg"); size != "large" {
+			if _, err := os.Stat(large); err == nil {
+				src = large
+			}
+		}
+	}
+	return s.cachedThumbnail(src, filepath.Join(dir, size+".jpg"), size, 0, false)
+}
+
+// Coalesce concurrent requests and publish only complete files to avoid partially painted JPEGs.
+func (s *ThumbnailService) cachedThumbnail(srcPath, thumbPath, size string, rotation int, cacheExists bool) (string, error) {
+	if cacheExists {
+		if _, ok := s.existsCache.Load(thumbPath); ok {
+			return thumbPath, nil
+		}
+	}
+	_, err, _ := s.thumbnailRequests.Do(thumbPath, func() (interface{}, error) {
+		if _, err := os.Stat(thumbPath); err == nil {
+			if cacheExists {
+				s.existsCache.Store(thumbPath, struct{}{})
+			}
+			return nil, nil
+		}
+		s.thumbnailSlots <- struct{}{}
+		defer func() { <-s.thumbnailSlots }()
+		f, err := os.CreateTemp(filepath.Dir(thumbPath), ".thumb-*"+filepath.Ext(thumbPath))
+		if err != nil {
+			return nil, err
+		}
+		tmp := f.Name()
+		_ = f.Close()
+		defer func() { _ = os.Remove(tmp) }()
+		if err := s.generateThumbnail(srcPath, tmp, size, rotation); err != nil {
+			return nil, err
+		}
+		if err := os.Chmod(tmp, 0644); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(tmp, thumbPath); err != nil {
+			return nil, err
+		}
+		if cacheExists {
+			s.existsCache.Store(thumbPath, struct{}{})
+		}
+		return nil, nil
+	})
+	if err != nil {
 		return "", err
 	}
-
-	s.existsCache.Store(thumbPath, struct{}{})
 	return thumbPath, nil
 }
 
 // RebuildDerivatives regenerates all cached renderings of a photo; any render-affecting change must call it.
 func (s *ThumbnailService) RebuildDerivatives(photoID int, photoPath, blurhash string, rotation, width, height int) {
 	_ = s.DeleteThumbnailsByID(photoID)
-	for _, size := range thumbSizes {
+	for _, size := range []string{"small", "medium", "large"} {
 		if _, err := s.GetThumbnailPathByID(photoID, photoPath, size, rotation); err != nil {
 			log.Printf("thumbnail %s for photo %d (%s): %v", size, photoID, photoPath, err)
 		}
@@ -126,21 +215,16 @@ func (s *ThumbnailService) generateThumbnail(srcPath, dstPath, size string, rota
 	}
 	img = applyRotation(img, rotation)
 
-	var width int
-	var quality int
+	width, ok := ThumbnailWidth(size)
+	if !ok {
+		return fmt.Errorf("invalid thumbnail size %q", size)
+	}
+	quality := 92
 	switch size {
 	case "small":
-		width = 300
 		quality = 80
 	case "medium":
-		width = 1000
 		quality = 86
-	case "large":
-		width = 2560
-		quality = 90
-	default:
-		width = 300
-		quality = 80
 	}
 
 	thumb := resizeToWidth(img, width)
@@ -248,6 +332,9 @@ func placeholderDims(width, height int) (int, int) {
 }
 
 func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string, width, height int) (string, error) {
+	lock := s.cacheLock(photoID)
+	lock.RLock()
+	defer lock.RUnlock()
 	placeholderPath := filepath.Join(s.cacheDir, "placeholder", s.stem(photoID)+".png")
 
 	if _, ok := s.existsCache.Load(placeholderPath); ok {
@@ -280,11 +367,14 @@ func (s *ThumbnailService) GetPlaceholderPathByID(photoID int, blurhash string, 
 }
 
 func (s *ThumbnailService) DeleteThumbnailsByID(photoID int) error {
+	lock := s.cacheLock(photoID)
+	lock.Lock()
+	defer lock.Unlock()
 	stems := []string{fmt.Sprintf("%d", photoID)}
 	if len(s.secret) > 0 {
 		stems = append(stems, s.privateStem(photoID))
 	}
-	for _, size := range []string{"small", "medium", "large", "placeholder"} {
+	for _, size := range derivativeDirs {
 		for _, ext := range []string{".jpg", ".png"} {
 			for _, stem := range stems {
 				path := filepath.Join(s.cacheDir, size, stem+ext)
@@ -297,7 +387,7 @@ func (s *ThumbnailService) DeleteThumbnailsByID(photoID int) error {
 }
 
 func (s *ThumbnailService) PrewarmCache() {
-	for _, size := range []string{"small", "medium", "large", "placeholder"} {
+	for _, size := range derivativeDirs {
 		dir := filepath.Join(s.cacheDir, size)
 		entries, err := os.ReadDir(dir)
 		if err != nil {

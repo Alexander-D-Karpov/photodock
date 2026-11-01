@@ -24,7 +24,7 @@
 
     {{if .NextURL}}<link rel="prefetch" href="{{.NextURL}}">{{end}}
     {{if .PrevURL}}<link rel="prefetch" href="{{.PrevURL}}">{{end}}
-    <link rel="preload" href="{{thumb "large" .Photo.ID .Photo.EditHash}}" as="image">
+    <link rel="preload" href="{{thumb "small" .Photo.ID .Photo.EditHash}}" as="image" fetchpriority="high">
 </head>
 <body>
 <div class="viewer-container">
@@ -55,7 +55,7 @@
             {{end}}
             {{if .Develop}}
             <button type="button" class="btn-icon compare-top develop-compare-btn" title="Hold to see the original (B)"
-                    data-before="/thumb/large/{{.Photo.ID}}?unedited=1">
+                    data-before="/thumb/small/{{.Photo.ID}}?unedited=1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/><path d="M3 15l5-5 4 4"/></svg>
                 <span>Original</span>
             </button>
@@ -80,7 +80,13 @@
             </div>
 
             <div class="viewer-image">
-                <img src="{{thumb "large" .Photo.ID .Photo.EditHash}}" alt="{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{else}}{{.Photo.Filename}}{{end}}" id="main-image" data-original="{{original .Photo.ID .Photo.EditHash}}">
+                <div class="viewer-photo" id="main-image" role="img" aria-label="{{if .Photo.Title.Valid}}{{.Photo.Title.String}}{{else}}{{.Photo.Filename}}{{end}}"
+                     data-width="{{.Photo.Width}}" data-height="{{.Photo.Height}}" data-small="{{thumb "small" .Photo.ID .Photo.EditHash}}"
+                     {{if and (gt .Photo.Width 0) (gt .Photo.Height 0)}}style="aspect-ratio: {{.Photo.Width}} / {{.Photo.Height}}; width: min(100%, {{.Photo.Width}}px, calc((100vh - 100px) * {{divf .Photo.Width .Photo.Height}}));"{{end}}>
+                    {{if .Photo.Blurhash.Valid}}<img class="viewer-placeholder" src="{{placeholder .Photo.ID .Photo.EditHash}}" alt="" aria-hidden="true">{{end}}
+                    <img class="viewer-preview" src="{{thumb "small" .Photo.ID .Photo.EditHash}}" alt="" aria-hidden="true" fetchpriority="high" decoding="async">
+                    <noscript><img class="viewer-fallback" src="{{thumb "medium" .Photo.ID .Photo.EditHash}}" alt="" aria-hidden="true"></noscript>
+                </div>
             </div>
         </div>
 
@@ -278,13 +284,14 @@
         {{template "icon-info"}}
     </button>
 </div>
+<script src="{{asset "/static/js/images.js"}}"></script>
 <script src="{{asset "/static/js/viewer.js"}}"></script>
 <script>
     initViewer({
         prevUrl: {{if .PrevURL}}"{{.PrevURL}}"{{else}}null{{end}},
     nextUrl: {{if .NextURL}}"{{.NextURL}}"{{else}}null{{end}},
-    prevOriginal: {{if .PrevOriginal}}"{{.PrevOriginal}}"{{else}}null{{end}},
-    nextOriginal: {{if .NextOriginal}}"{{.NextOriginal}}"{{else}}null{{end}},
+    prevPreview: {{if .PrevPreview}}"{{.PrevPreview}}"{{else}}null{{end}},
+    nextPreview: {{if .NextPreview}}"{{.NextPreview}}"{{else}}null{{end}},
     folderUrl: {{if .FolderURL}}"{{.FolderURL}}"{{else}}null{{end}}
     });
 </script>

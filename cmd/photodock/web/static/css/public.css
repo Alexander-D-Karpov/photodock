@@ -229,9 +229,7 @@ html.js #gallery:not(.jl-ready) { visibility: hidden; }
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: fill;
-    filter: blur(20px);
-    transform: scale(1.1);
+    object-fit: cover;
     transition: opacity 0.3s ease-out;
     z-index: 2;
     opacity: 0;
@@ -247,13 +245,14 @@ html.js #gallery:not(.jl-ready) { visibility: hidden; }
     height: 100%;
     object-fit: cover;
     opacity: 0;
-    transition: opacity 0.3s ease-out;
+    transition: opacity 0.45s ease-out;
     position: relative;
     z-index: 3;
 }
 
 .progressive-image.loaded .skeleton-shimmer {
     opacity: 0;
+    animation: none;
 }
 
 .progressive-image.loaded .placeholder {
@@ -263,6 +262,15 @@ html.js #gallery:not(.jl-ready) { visibility: hidden; }
 
 .progressive-image.loaded .full-image {
     opacity: 1;
+}
+
+.progressive-image .fallback-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 3;
 }
 
 @keyframes shimmer {
@@ -400,18 +408,69 @@ html.js #gallery:not(.jl-ready) { visibility: hidden; }
     overflow: hidden;
 }
 
-.viewer-image img {
+.viewer-photo {
+    position: relative;
+    flex: none;
     max-width: 100%;
-    max-height: calc(100vh - 100px);
-    object-fit: contain;
+    max-height: 100%;
+    width: 100%;
+    aspect-ratio: 4 / 3;
     cursor: zoom-in;
     transition: transform 0.1s ease-out;
-    transform-origin: center center;
+    transform-origin: 0 0;
+    overflow: hidden;
+    background: #151515;
 }
 
 /* Zoom is transform-only: the box must keep its fit size since pan/zoom math depends on it. */
-.viewer-image img.zoomed {
+.viewer-photo.zoomed {
     cursor: grab;
+}
+
+.viewer-photo img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+}
+
+.viewer-preview {
+    opacity: 0;
+    filter: blur(1px);
+    transition: opacity 0.35s ease-out;
+}
+
+.viewer-photo.preview-ready .viewer-preview {
+    opacity: 1;
+}
+
+.viewer-detail {
+    opacity: 0;
+    transition: opacity 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.viewer-detail.ready {
+    opacity: 1;
+}
+
+.viewer-compare {
+    z-index: 2;
+    opacity: 0;
+    transition: opacity 0.15s ease-out;
+}
+
+.viewer-compare.visible { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+    .progressive-image .full-image,
+    .progressive-image .placeholder,
+    .viewer-preview,
+    .viewer-detail,
+    .viewer-compare { transition: none; filter: none; }
+    .progressive-image .skeleton-shimmer { animation: none; }
 }
 
 .viewer-nav {
@@ -815,7 +874,6 @@ a.nav-btn:hover {
     }
     .viewer-sidebar.open { transform: translateX(0); }
     .sidebar-toggle { display: flex; }
-    .viewer-image img { max-height: calc(100vh - 80px); }
 }
 
 @media (max-width: 768px) {
@@ -844,7 +902,6 @@ a.nav-btn:hover {
     .photo-counter { display: none; }
     .viewer-header-right { gap: 2px; }
     .viewer-header-right .btn-icon { padding: 7px; }
-    .viewer-image img { max-height: calc(100vh - 72px); }
     .nav-btn { width: 50px; }
     .nav-btn svg { width: 24px; height: 24px; }
     .file-list .col-date { display: none; }

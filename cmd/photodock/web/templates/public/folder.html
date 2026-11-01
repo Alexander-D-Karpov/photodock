@@ -133,16 +133,13 @@
                     <a href="{{if .URLPath}}/p/{{.URLPath}}{{else}}/photo/{{.ID}}{{end}}" class="photo-item"
                        data-id="{{.ID}}" data-name="{{.Filename}}" data-size="{{.SizeBytes}}"
                        data-date="{{if .TakenAt.Valid}}{{.TakenAt.Time.Unix}}{{else}}{{.CreatedAt.Unix}}{{end}}">
-                        <div class="progressive-image" style="aspect-ratio: {{.Width}} / {{.Height}};">
+                        <div class="progressive-image" style="aspect-ratio: {{.Width}} / {{.Height}};" data-width="{{.Width}}" data-small="{{thumb "small" .ID .EditHash}}">
                             <div class="skeleton-shimmer"></div>
                             {{if .Blurhash.Valid}}
-                            <img class="placeholder" src="{{placeholder .ID .EditHash}}" alt="" aria-hidden="true" onload="this.classList.add('ready')">
+                            <img class="placeholder" src="{{placeholder .ID .EditHash}}" alt="" aria-hidden="true" loading="lazy" onload="this.classList.add('ready')">
                             {{end}}
-                            <img class="full-image"
-                                 src="{{thumb "small" .ID .EditHash}}"
-                                 data-medium="{{thumb "medium" .ID .EditHash}}"
-                                 alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}"
-                                 loading="lazy">
+                            <img class="full-image" alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}">
+                            <noscript><img class="fallback-image" src="{{thumb "medium" .ID .EditHash}}" alt="{{if .Title.Valid}}{{.Title.String}}{{else}}{{.Filename}}{{end}}" loading="lazy"></noscript>
                         </div>
                     </a>
                     {{end}}
@@ -158,6 +155,7 @@
         <span><a href="https://github.com/Alexander-D-Karpov/photodock" target="_blank" rel="noopener">GitHub</a></span>
     </footer>
 </div>
+<script src="{{asset "/static/js/images.js"}}"></script>
 <script src="{{asset "/static/js/gallery.js"}}"></script>
 <script src="{{asset "/static/js/index.js"}}"></script>
 </body>

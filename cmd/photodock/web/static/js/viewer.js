@@ -26,10 +26,6 @@ function initViewer(opts) {
         toggle.addEventListener('click', () => sidebar.classList.toggle('open'));
     }
 
-    // Prefetch neighbors (helps navigation feel instant)
-    if (opts.prevOriginal) new Image().src = opts.prevOriginal;
-    if (opts.nextOriginal) new Image().src = opts.nextOriginal;
-
     // Keyboard navigation
     document.addEventListener('keydown', (e) => {
         const tag = e.target && e.target.tagName;
@@ -69,14 +65,16 @@ function initViewer(opts) {
     // Mobile: stop browser’s native pan/zoom from stealing gestures
     container.style.touchAction = 'none';
 
-    // Preserve any existing CSS transform (re-sampled on resize since the computed matrix can change).
-    let cssTransform = '';
-    function refreshCssTransform() {
-        const prev = img.style.transform;
-        img.style.transform = ''; // reveal pure CSS transform
-        const t = getComputedStyle(img).transform;
-        cssTransform = (t && t !== 'none') ? t : '';
-        img.style.transform = prev;
+    const sourceWidth = Number(img.dataset.width) || 0;
+    const sourceHeight = Number(img.dataset.height) || 0;
+
+    // The frame, placeholder and both image layers have identical, stable geometry.
+    function fitFrame() {
+        if (!sourceWidth || !sourceHeight) return;
+        const factor = Math.min(container.clientWidth / sourceWidth, container.clientHeight / sourceHeight, 1);
+        if (factor <= 0) return;
+        img.style.width = (sourceWidth * factor) + 'px';
+        img.style.height = (sourceHeight * factor) + 'px';
     }
 
     function getContainerRect() {
@@ -97,8 +95,8 @@ function initViewer(opts) {
     }
 
     function getMaxZoom() {
-        const natW = img.naturalWidth || base.width || 1;
-        const natH = img.naturalHeight || base.height || 1;
+        const natW = sourceWidth || base.width || 1;
+        const natH = sourceHeight || base.height || 1;
         const zx = natW / (base.width || 1);
         const zy = natH / (base.height || 1);
         return Math.max(4, zx, zy);
@@ -164,35 +162,58 @@ function initViewer(opts) {
 
         clamp();
         apply();
+        scheduleDetail();
     }
 
-    function upgradeToOriginal() {
-        const orig = img.dataset.original;
-        if (!orig || img.dataset.upgraded) return;
-        img.dataset.upgraded = 'pending';
-
-        const hi = new Image();
-        hi.src = orig;
-
-        // Decode off-screen before swapping so the visible <img> paints from cache without blanking.
-        const swap = () => {
-            img.src = orig;
-            img.dataset.upgraded = 'true';
-        };
-        if (hi.decode) {
-            hi.decode().then(swap).catch(() => { img.dataset.upgraded = ''; });
-        } else {
-            hi.onload = swap;
-            hi.onerror = () => { img.dataset.upgraded = ''; };
-        }
+    let detailWidth = 0;
+    let requestedWidth = 0;
+    let detailTimer = null;
+    function loadDetail() {
+        if (!img.dataset.small || !base.width) return;
+        const size = PhotoImages.choose(base.width, sourceWidth, state.scale);
+        if (size.width <= detailWidth || size.width <= requestedWidth) return;
+        requestedWidth = size.width;
+        const detail = new Image();
+        detail.className = 'viewer-detail';
+        detail.alt = '';
+        detail.setAttribute('aria-hidden', 'true');
+        detail.decoding = 'async';
+        detail.fetchPriority = 'low';
+        detail.src = PhotoImages.url(img.dataset.small, size.name);
+        PhotoImages.ready(detail).then(() => {
+            if (size.width <= detailWidth) return;
+            detailWidth = size.width;
+            if (requestedWidth === size.width) requestedWidth = 0;
+            const previous = Array.from(img.querySelectorAll('.viewer-detail'));
+            img.appendChild(detail);
+            requestAnimationFrame(() => requestAnimationFrame(() => detail.classList.add('ready')));
+            // Keep the previous layer underneath throughout the transition.
+            setTimeout(() => previous.forEach(layer => layer.remove()), 1000);
+        }).catch(() => {
+            if (requestedWidth === size.width) requestedWidth = 0;
+        });
     }
 
-    function onReady() {
-        reset();
-        upgradeToOriginal();
+    function scheduleDetail() {
+        clearTimeout(detailTimer);
+        detailTimer = setTimeout(loadDetail, 180);
     }
-    if (img.complete) onReady();
-    else img.addEventListener('load', onReady, { once: true });
+
+    const preview = img.querySelector('.viewer-preview');
+    if (preview) {
+        PhotoImages.ready(preview).then(() => {
+            img.classList.add('preview-ready');
+            const connection = navigator.connection;
+            if (connection && (connection.saveData || /(^|-)2g$/.test(connection.effectiveType || ''))) return;
+            const prefetch = () => [opts.prevPreview, opts.nextPreview].filter(Boolean).forEach(url => {
+                const neighbor = new Image();
+                neighbor.fetchPriority = 'low';
+                neighbor.src = url;
+            });
+            if ('requestIdleCallback' in window) requestIdleCallback(prefetch, { timeout: 3000 });
+            else setTimeout(prefetch, 1000);
+        }).catch(() => {});
+    }
 
     // Smooth wheel zoom (works better for trackpads too)
     container.addEventListener('wheel', (e) => {
@@ -347,16 +368,20 @@ function initViewer(opts) {
 
     // Recompute preserved CSS transform on resize (common source of broken zoom math/layout)
     window.addEventListener('resize', () => {
+        fitFrame();
         measureBase();
         clamp();
         apply();
+        scheduleDetail();
     }, { passive: true });
 
     initCompare(img);
 
     // Initial paint
+    fitFrame();
     measureBase();
     apply();
+    loadDetail();
 }
 
 // initCompare shows the unedited photo while a compare button or B is held, then restores the view.
@@ -364,19 +389,35 @@ function initCompare(img) {
     const btns = Array.from(document.querySelectorAll('.develop-compare-btn'));
     if (!btns.length || !img) return;
     const before = btns[0].dataset.before;
-    let saved = null;
-    new Image().src = before;
+    let active = false;
+    let compare = null;
 
     const show = () => {
-        if (saved !== null) return;
-        saved = img.src;
-        img.src = before;
+        if (active) return;
+        active = true;
         btns.forEach((b) => b.classList.add('active'));
+        if (!compare) {
+            compare = new Image();
+            compare.className = 'viewer-compare';
+            compare.alt = '';
+            compare.setAttribute('aria-hidden', 'true');
+            const size = PhotoImages.choose(img.clientWidth, Number(img.dataset.width), state.scale);
+            compare.src = PhotoImages.url(before, size.name);
+            img.appendChild(compare);
+            PhotoImages.ready(compare).then(() => {
+                if (active) compare.classList.add('visible');
+            }).catch(() => {
+                compare.remove();
+                compare = null;
+            });
+        } else if (compare.complete && compare.naturalWidth) {
+            compare.classList.add('visible');
+        }
     };
     const hide = () => {
-        if (saved === null) return;
-        img.src = saved;
-        saved = null;
+        if (!active) return;
+        active = false;
+        if (compare) compare.classList.remove('visible');
         btns.forEach((b) => b.classList.remove('active'));
     };
 

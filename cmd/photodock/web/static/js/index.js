@@ -44,31 +44,9 @@
     }
 
     function initGallery() {
-        const lazyImages = document.querySelectorAll('#grid-view img.lazy');
-        const imageObserver = new IntersectionObserver((entries, observer) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const img = entry.target;
-                    if (img.dataset.placeholder) {
-                        img.src = img.dataset.placeholder;
-                        img.classList.add('loading');
-                    }
-                    const fullImg = new Image();
-                    fullImg.onload = () => {
-                        img.src = img.dataset.src;
-                        img.classList.remove('loading', 'lazy');
-                    };
-                    fullImg.src = img.dataset.src;
-                    observer.unobserve(img);
-                }
-            });
-        }, { rootMargin: '200px' });
-        lazyImages.forEach(img => {
-            if (!img.dataset.observed) {
-                img.dataset.observed = 'true';
-                imageObserver.observe(img);
-            }
-        });
+        if (window.layoutJustified) window.layoutJustified();
+        if (window.initGalleryLazyLoading) window.initGalleryLazyLoading();
+        if (window.initFolderLazyLoading) window.initFolderLazyLoading();
     }
 
     const sortSelect = document.getElementById('sort-select');
